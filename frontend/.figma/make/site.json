@@ -1,0 +1,10 @@
+{
+  "description": "Detects synthetic media and deepfakes in real-time during insurance claims, enabling adjusters to identify fraud and streamline claim verification.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,0 +1,22 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+
+# Database (don't commit real/seeded data)
+backend/claims.db
+
+# Uploaded media
+backend/app/media_store/
+
+# Environment variables — NEVER commit real secrets
+backend/.env
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS junk
+.DS_Store
+Thumbs.db
