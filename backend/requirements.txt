@@ -9,3 +9,5 @@ chromadb
 reportlab
 pillow
 truststore
+pytest
+pytest-asyncio
