@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import truststore
+
+truststore.inject_into_ssl()  # use OS cert store so vendor API TLS verification works
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

@@ -28,7 +28,8 @@ async def submit_claim(
     coverage_id: int = Form(...),
     accident_location: str = Form(...),
     accident_description: str = Form(...),
-    video: UploadFile = File(...),
+    video: Optional[UploadFile] = File(None),
+    image: Optional[UploadFile] = File(None),
     audio: UploadFile = File(...),
     document: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_user),
@@ -43,9 +44,11 @@ async def submit_claim(
     if not policy or policy.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Coverage does not belong to your policy.")
 
-    # Validate mandatory files
-    if not video or not video.filename:
-        raise HTTPException(status_code=400, detail="Video/photo evidence is required.")
+    # At least one visual evidence is required
+    has_video = video and video.filename
+    has_image = image and image.filename
+    if not has_video and not has_image:
+        raise HTTPException(status_code=400, detail="At least one video or image evidence is required.")
     if not audio or not audio.filename:
         raise HTTPException(status_code=400, detail="Audio statement is required.")
 
@@ -58,8 +61,15 @@ async def submit_claim(
     claim_number = _generate_claim_number(db)
 
     # Save media files
-    video_content = await video.read()
-    video_url = save_file(claim_number, video.filename, video_content)
+    video_url = None
+    if has_video:
+        video_content = await video.read()
+        video_url = save_file(claim_number, video.filename, video_content)
+
+    image_url = None
+    if has_image:
+        image_content = await image.read()
+        image_url = save_file(claim_number, image.filename, image_content)
 
     audio_content = await audio.read()
     audio_url = save_file(claim_number, audio.filename, audio_content)
@@ -73,6 +83,7 @@ async def submit_claim(
         accident_location=accident_location,
         accident_description=accident_description,
         video_url=video_url,
+        image_url=image_url,
         audio_url=audio_url,
         status="processing",
     )
@@ -142,9 +153,12 @@ def list_all_claims(
             "accident_location": c.accident_location,
             "accident_description": c.accident_description,
             "video_url": c.video_url,
+            "image_url": c.image_url,
             "audio_url": c.audio_url,
             "fraud_confidence_score": c.fraud_confidence_score,
             "artifact_report": c.artifact_report,
+            "payout_amount_cents": c.payout_amount_cents,
+            "payout_transaction_id": c.payout_transaction_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "documents": [{"id": d.id, "file_url": d.file_url, "file_type": d.file_type} for d in docs],
             "analyses": [
@@ -322,6 +336,7 @@ def get_claim(
         "accident_location": claim.accident_location,
         "accident_description": claim.accident_description,
         "video_url": claim.video_url,
+        "image_url": claim.image_url,
         "audio_url": claim.audio_url,
         "fraud_confidence_score": claim.fraud_confidence_score,
         "consistency_score": claim.consistency_score,

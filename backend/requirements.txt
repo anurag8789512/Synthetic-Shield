@@ -4,3 +4,8 @@ sqlalchemy
 pydantic
 pydantic-settings
 python-multipart
+httpx
+chromadb
+reportlab
+pillow
+truststore

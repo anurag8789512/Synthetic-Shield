@@ -23,11 +23,13 @@ synthetic shield/
 │   ├── claims.db     ← SQLite database (auto-created)
 │   └── seed_data.py  ← Creates test users & officers
 │
-├── frontend/         ← React + Vite (TypeScript)
-│   ├── src/          ← Source code
-│   ├── dashboard.html ← SIU Dashboard entry
-│   ├── mobile.html    ← Mobile FNOL app entry
-│   └── package.json
+├── frontend/         ← React + Vite (TypeScript), two standalone apps
+│   ├── dashboard/    ← SIU Dashboard app (port 3000)
+│   │   ├── src/
+│   │   └── package.json
+│   └── mobile/       ← Mobile FNOL app (port 3001)
+│       ├── src/
+│       └── package.json
 │
 └── instruction/      ← Spec documents
 ```
@@ -115,10 +117,13 @@ Verify it works: open http://localhost:8000/docs in your browser (Swagger UI).
 
 ## Step 4: Set Up the Frontend
 
-Open a **new terminal**:
+Each app has its own dependencies. Open a **new terminal**:
 
 ```powershell
-cd "synthetic shield/frontend"
+cd "synthetic shield/frontend/dashboard"
+npm install
+
+cd "../mobile"
 npm install
 ```
 
@@ -128,22 +133,24 @@ npm install
 
 **SIU Dashboard** (for insurance officers):
 ```powershell
-npx vite --config vite.dashboard.config.ts
+cd "synthetic shield/frontend/dashboard"
+npm run dev
 ```
-Opens at: **http://localhost:3000/dashboard.html**
+Opens at: **http://localhost:3000/**
 
 **Mobile FNOL App** (for claimants) — in another terminal:
 ```powershell
-npx vite --config vite.mobile.config.ts
+cd "synthetic shield/frontend/mobile"
+npm run dev
 ```
-Opens at: **http://localhost:3001/mobile.html**
+Opens at: **http://localhost:3001/**
 
 ---
 
 ## How to Test
 
 ### Mobile App (Claimant Flow)
-1. Open http://localhost:3001/mobile.html
+1. Open http://localhost:3001/
 2. Enter phone `6202234696` or email `krishnaanurag16@gmail.com`
 3. If `OTP_PROVIDER=console`: the OTP will show on screen. If `email`: check your inbox
 4. Enter the OTP → you're logged in
@@ -151,7 +158,7 @@ Opens at: **http://localhost:3001/mobile.html**
 6. The AI detection runs in the background (~2 seconds)
 
 ### SIU Dashboard (Officer Flow)
-1. Open http://localhost:3000/dashboard.html
+1. Open http://localhost:3000/
 2. Login with: `krishnaanurag16@gmail.com` / `shield@123`
 3. **Claims Queue**: see submitted claims with fraud scores and AI analysis
 4. **Lifecycle**: view the full claim flowchart from submission to decision

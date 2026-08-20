@@ -1,17 +1,94 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Shield, ChevronRight, ChevronLeft, Phone, Mail, ArrowLeft,
-  Car, Calendar, CheckCircle, Upload, Mic, FileText, Eye,
-  AlertTriangle, Clock, RotateCcw, Play, Pause, X, Loader,
+  Car, Calendar, CheckCircle, Upload, Mic, FileText, Film, Camera,
+  AlertTriangle, Clock, RotateCcw, X, Loader,
   Wifi, Battery, Signal,
 } from 'lucide-react'
-import { POLICY } from '../../data/mock'
 import { Btn, FormInput, C } from '../common/ui'
+
+// ── Live policy data ──────────────────────────────────────────────────────────────
+interface CoverageInfo { id: number; label: string; type: string; limitCents: number | null }
+interface PolicyInfo {
+  id: number
+  policyNumber: string
+  status: string
+  renewalDate: string
+  coverages: CoverageInfo[]
+}
+
+function usePolicy() {
+  const [policy, setPolicy] = useState<PolicyInfo | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const token = sessionStorage.getItem('ss_token')
+    if (!token) { setError('Not authenticated.'); return }
+    fetch('http://localhost:8000/policies/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((list: any[]) => {
+        const p = list?.[0]
+        if (!p) { setError('No policy found for this account.'); return }
+        setPolicy({
+          id: p.id,
+          policyNumber: p.policy_number,
+          status: p.status,
+          renewalDate: p.renewal_date || '',
+          coverages: (p.coverages || []).map((c: any) => ({
+            id: c.id,
+            label: c.coverage_label,
+            type: c.coverage_type,
+            limitCents: c.coverage_limit_cents,
+          })),
+        })
+      })
+      .catch(() => setError('Could not load your policy. Is the backend running?'))
+  }, [])
+
+  return { policy, error }
+}
+
+const fmtLimit = (cents: number | null) =>
+  cents == null ? '' : `Coverage limit ${(cents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}`
+
+const fmtDate = (iso: string) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
+
+// Convert a recorded blob (webm/opus) to 16-bit PCM WAV — required by the audio detection vendor
+async function blobToWavFile(blob: Blob): Promise<File> {
+  const arrayBuffer = await blob.arrayBuffer()
+  const ctx = new AudioContext()
+  const audioBuf = await ctx.decodeAudioData(arrayBuffer)
+  await ctx.close()
+
+  const numCh = Math.min(audioBuf.numberOfChannels, 2)
+  const dataLen = audioBuf.length * numCh * 2
+  const buffer = new ArrayBuffer(44 + dataLen)
+  const view = new DataView(buffer)
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)) }
+
+  writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataLen, true); writeStr(8, 'WAVE')
+  writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true)
+  view.setUint16(22, numCh, true); view.setUint32(24, audioBuf.sampleRate, true)
+  view.setUint32(28, audioBuf.sampleRate * numCh * 2, true); view.setUint16(32, numCh * 2, true)
+  view.setUint16(34, 16, true); writeStr(36, 'data'); view.setUint32(40, dataLen, true)
+
+  const channels = Array.from({ length: numCh }, (_, ch) => audioBuf.getChannelData(ch))
+  let offset = 44
+  for (let i = 0; i < audioBuf.length; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      const s = Math.max(-1, Math.min(1, channels[ch][i]))
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+      offset += 2
+    }
+  }
+  return new File([buffer], 'voice_statement.wav', { type: 'audio/wav' })
+}
 
 // ── Screen types ──────────────────────────────────────────────────────────────
 type Screen = 'login' | 'otp' | 'policy' | 'claim' | 'verifying' | 'outcome' | 'confirmation' | 'reappeal'
 type Outcome = 'approved' | 'review' | 'siu'
-type ClaimStep = 0 | 1 | 2 | 3 | 4 // A B C D E
+type ClaimStep = 0 | 1 | 2 | 3 | 4 | 5 // A B C D E F
 
 // ── Waveform animation bars ───────────────────────────────────────────────────
 function WaveBars({ active }: { active: boolean }) {
@@ -36,7 +113,7 @@ function WaveBars({ active }: { active: boolean }) {
 }
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
-const STEP_LABELS = ['Coverage', 'Evidence', 'Statement', 'Documents', 'Review']
+const STEP_LABELS = ['Coverage', 'Video', 'Photos', 'Statement', 'Documents', 'Review']
 function StepProgress({ step }: { step: ClaimStep }) {
   return (
     <div>
@@ -61,7 +138,7 @@ function StepProgress({ step }: { step: ClaimStep }) {
         ))}
       </div>
       <div style={{ height: 2, background: 'rgba(255,255,255,0.1)', borderRadius: 1, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${(step / 4) * 100}%`, background: `linear-gradient(90deg,${C.primary},#38BDF8)`, borderRadius: 1, transition: 'width 0.4s' }} />
+        <div style={{ height: '100%', width: `${(step / 5) * 100}%`, background: `linear-gradient(90deg,${C.primary},#38BDF8)`, borderRadius: 1, transition: 'width 0.4s' }} />
       </div>
     </div>
   )
@@ -313,7 +390,22 @@ function OTPScreen({ onNext, onBack, identifier, debugOtp }: { onNext: () => voi
 // Screen 3 — Policy Dashboard
 // ═══════════════════════════════════════════════════════════════════════════════
 function PolicyDashboard({ onSubmitClaim }: { onSubmitClaim: () => void }) {
-  const p = POLICY
+  const { policy, error } = usePolicy()
+  const holderName = sessionStorage.getItem('ss_user') || 'Policyholder'
+
+  if (!policy) {
+    return (
+      <PhoneFrame dark={false}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '0 28px' }}>
+          {error
+            ? <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '12px 16px', fontSize: 13, color: '#B91C1C', textAlign: 'center' }}>{error}</div>
+            : <><Loader size={22} color="#0284C7" style={{ animation: 'spin-slow 1s linear infinite' }} /><div style={{ fontSize: 13, color: '#64748B' }}>Loading your policy…</div></>
+          }
+        </div>
+      </PhoneFrame>
+    )
+  }
+
   return (
     <PhoneFrame dark={false}>
       {/* Header */}
@@ -325,68 +417,49 @@ function PolicyDashboard({ onSubmitClaim }: { onSubmitClaim: () => void }) {
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>SyntheticShield</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{p.holderName}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{holderName}</div>
             </div>
           </div>
-          <span style={{ background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.35)', color: '#6EE7B7', borderRadius: 20, padding: '3px 10px', fontSize: 10, fontWeight: 700 }}>
-            ● ACTIVE
+          <span style={{
+            background: policy.status === 'active' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
+            border: `1px solid ${policy.status === 'active' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'}`,
+            color: policy.status === 'active' ? '#6EE7B7' : '#FCA5A5',
+            borderRadius: 20, padding: '3px 10px', fontSize: 10, fontWeight: 700,
+          }}>
+            ● {policy.status.toUpperCase()}
           </span>
         </div>
         <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}>Policy Number</div>
-        <div style={{ fontSize: 13, fontFamily: 'monospace', color: '#7DD3FC', letterSpacing: '0.04em' }}>{p.policyNumber}</div>
+        <div style={{ fontSize: 13, fontFamily: 'monospace', color: '#7DD3FC', letterSpacing: '0.04em' }}>{policy.policyNumber}</div>
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Vehicle card */}
+        {/* Coverages */}
         <div style={{ background: '#fff', borderRadius: 12, padding: '14px', border: '1px solid #E2E8F0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Car size={16} color="#2563EB" />
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Insured Vehicle</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>Active Coverages</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              ['Make', p.vehicle.make],
-              ['Model', p.vehicle.model],
-              ['Year', String(p.vehicle.year)],
-              ['Plate', p.vehicle.plate],
-            ].map(([l, v]) => (
-              <div key={l}>
-                <div style={{ fontSize: 9, color: '#94A3B8', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>{l}</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', marginTop: 2 }}>{v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Coverages */}
-        <div style={{ background: '#fff', borderRadius: 12, padding: '14px', border: '1px solid #E2E8F0' }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>Active Coverages</div>
-          {p.coverages.map((cov, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', paddingBottom: i < p.coverages.length - 1 ? 10 : 0, marginBottom: i < p.coverages.length - 1 ? 10 : 0, borderBottom: i < p.coverages.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+          {policy.coverages.map((cov, i) => (
+            <div key={cov.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', paddingBottom: i < policy.coverages.length - 1 ? 10 : 0, marginBottom: i < policy.coverages.length - 1 ? 10 : 0, borderBottom: i < policy.coverages.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
               <CheckCircle size={14} color="#10B981" style={{ marginTop: 1, flexShrink: 0 }} />
               <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A' }}>{cov.name}</div>
-                <div style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>{cov.description}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A' }}>{cov.label}</div>
+                {cov.limitCents != null && <div style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>{fmtLimit(cov.limitCents)}</div>}
               </div>
             </div>
           ))}
         </div>
 
         {/* Renewal */}
-        <div style={{ background: '#fff', borderRadius: 12, padding: '14px', border: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Calendar size={16} color="#2563EB" />
-            <div>
-              <div style={{ fontSize: 10, color: '#94A3B8' }}>Renewal Date</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{p.renewalDate}</div>
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 10, color: '#94A3B8' }}>Premium</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{p.premium}</div>
+        <div style={{ background: '#fff', borderRadius: 12, padding: '14px', border: '1px solid #E2E8F0', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Calendar size={16} color="#2563EB" />
+          <div>
+            <div style={{ fontSize: 10, color: '#94A3B8' }}>Renewal Date</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{fmtDate(policy.renewalDate)}</div>
           </div>
         </div>
       </div>
@@ -410,39 +483,75 @@ function PolicyDashboard({ onSubmitClaim }: { onSubmitClaim: () => void }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Screen 4 — Claim Submission (Steps A–E)
 // ═══════════════════════════════════════════════════════════════════════════════
-function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: () => void }) {
+function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, claimNumber: string) => void; onBack: () => void }) {
   const [step, setStep] = useState<ClaimStep>(0)
   const [coverage, setCoverage] = useState('')
   const [location, setLocation] = useState('')
   const [description, setDescription] = useState('')
-  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
-  const [mediaFiles, setMediaFiles] = useState<File[]>([])
+  const [videoUploadState, setVideoUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [imageUploadState, setImageUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
+  const [imageFiles, setImageFiles] = useState<File[]>([])
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'done'>('idle')
   const [recordSecs, setRecordSecs] = useState(0)
+  const [recordError, setRecordError] = useState('')
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
+  const [audioPlaybackUrl, setAudioPlaybackUrl] = useState('')
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const [pdfState, setPdfState] = useState<'idle' | 'error' | 'done'>('idle')
   const [pdfName, setPdfName] = useState('')
   const [pdfFile, setPdfFile] = useState<File | null>(null)
-  const [playing, setPlaying] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const mediaInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
-  const coverages = POLICY.coverages.map(c => c.name)
+  const { policy } = usePolicy()
+  const coverages = policy?.coverages ?? []
 
   const canNext =
     step === 0 ? !!coverage && !!location && !!description :
-    step === 1 ? uploadState === 'done' :
-    step === 2 ? recordState === 'done' :
+    step === 1 ? videoUploadState === 'done' :
+    step === 2 ? imageUploadState === 'done' :
+    step === 3 ? recordState === 'done' :
     true // steps D and E always can proceed
 
-  const toggleRecord = () => {
+  const toggleRecord = async () => {
     if (recordState === 'idle') {
-      setRecordState('recording')
-      timerRef.current = setInterval(() => setRecordSecs(s => s + 1), 1000)
+      setRecordError('')
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const recorder = new MediaRecorder(stream)
+        audioChunksRef.current = []
+        recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+        recorder.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+          setAudioBlob(blob)
+          setAudioPlaybackUrl(URL.createObjectURL(blob))
+          stream.getTracks().forEach(t => t.stop())
+        }
+        mediaRecorderRef.current = recorder
+        recorder.start()
+        setRecordState('recording')
+        timerRef.current = setInterval(() => setRecordSecs(s => s + 1), 1000)
+      } catch {
+        setRecordError('Microphone access denied. Please allow microphone permission to record your statement.')
+      }
     } else if (recordState === 'recording') {
       clearInterval(timerRef.current!)
+      mediaRecorderRef.current?.stop()
       setRecordState('done')
     }
+  }
+
+  const resetRecording = () => {
+    if (audioPlaybackUrl) URL.revokeObjectURL(audioPlaybackUrl)
+    setAudioBlob(null)
+    setAudioPlaybackUrl('')
+    setRecordState('idle')
+    setRecordSecs(0)
   }
 
   useEffect(() => () => clearInterval(timerRef.current!), [])
@@ -454,12 +563,21 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
     setPdfState('done'); setPdfName(name)
   }
 
-  const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setVideoFile(file)
+      setVideoUploadState('uploading')
+      setTimeout(() => setVideoUploadState('done'), 1200)
+    }
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
-      setMediaFiles(files)
-      setUploadState('uploading')
-      setTimeout(() => setUploadState('done'), 1500)
+      setImageFiles(files)
+      setImageUploadState('uploading')
+      setTimeout(() => setImageUploadState('done'), 1200)
     }
   }
 
@@ -476,20 +594,26 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
     setSubmitting(true)
     const token = sessionStorage.getItem('ss_token')
     const formData = new FormData()
-    // Coverage ID: map label to index (1-based from seed data)
-    const covIndex = coverages.indexOf(coverage) + 1
-    formData.append('coverage_id', String(covIndex))
+    formData.append('coverage_id', coverage)
     formData.append('accident_location', location)
     formData.append('accident_description', description)
 
-    // Video/photo file
-    if (mediaFiles.length > 0) {
-      formData.append('video', mediaFiles[0])
+    if (videoFile) {
+      formData.append('video', videoFile)
     }
 
-    // Audio: create a dummy audio blob from recording (demo)
-    const audioBlob = new Blob(['recorded-audio-' + recordSecs + 's'], { type: 'audio/wav' })
-    formData.append('audio', new File([audioBlob], 'voice_statement.wav', { type: 'audio/wav' }))
+    if (imageFiles.length > 0) {
+      formData.append('image', imageFiles[0])
+    }
+
+    // Real recorded audio statement, converted to WAV for vendor analysis
+    if (audioBlob) {
+      try {
+        formData.append('audio', await blobToWavFile(audioBlob))
+      } catch {
+        formData.append('audio', new File([audioBlob], 'voice_statement.webm', { type: audioBlob.type }))
+      }
+    }
 
     // Optional PDF
     if (pdfFile) {
@@ -497,17 +621,22 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
     }
 
     try {
-      await fetch('http://localhost:8000/claims', {
+      const res = await fetch('http://localhost:8000/claims', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       })
-    } catch { /* proceed anyway for demo */ }
-    setSubmitting(false)
-    onSubmit()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Submission failed')
+      setSubmitting(false)
+      onSubmit(data.claim_id, data.claim_number)
+    } catch (e: any) {
+      setSubmitting(false)
+      setSubmitError(e.message || 'Could not reach the server. Is the backend running?')
+    }
   }
 
-  const goNext = () => { if (step < 4) setStep((step + 1) as ClaimStep); else submitToBackend() }
+  const goNext = () => { if (step < 5) setStep((step + 1) as ClaimStep); else submitToBackend() }
   const goPrev = () => { if (step > 0) setStep((step - 1) as ClaimStep); else onBack() }
 
   return (
@@ -541,7 +670,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
                 outline: 'none', fontFamily: 'Inter,system-ui,sans-serif', appearance: 'none' as const,
               }}>
                 <option value="">Select coverage…</option>
-                {coverages.map(c => <option key={c} value={c}>{c}</option>)}
+                {coverages.map(c => <option key={c.id} value={String(c.id)}>{c.label}</option>)}
               </select>
             </div>
             <FormInput label="Accident Location" placeholder="e.g. 47 Main St, Sydney NSW" value={location} onChange={setLocation} required />
@@ -549,54 +678,53 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
           </>
         )}
 
-        {/* ── Step B: Video/Photo (mandatory) ── */}
+        {/* ── Step B: Video upload ── */}
         {step === 1 && (
           <>
             <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8 }}>
-              <Eye size={14} color="#2563EB" style={{ flexShrink: 0, marginTop: 1 }} />
+              <Film size={14} color="#2563EB" style={{ flexShrink: 0, marginTop: 1 }} />
               <span style={{ fontSize: 11, color: '#1E40AF', lineHeight: 1.5 }}>
-                <strong>Required:</strong> Upload at least one photo or video of the damage. Your media will be scanned by SyntheticShield AI.
+                <strong>Required:</strong> Upload a video of the damage (dashcam footage, walkthrough, etc.). This will be scanned by SyntheticShield AI for deepfake artifacts.
               </span>
             </div>
 
             <input
-              ref={mediaInputRef}
+              ref={videoInputRef}
               type="file"
-              accept="image/*,video/*"
-              multiple
+              accept="video/*"
               style={{ display: 'none' }}
-              onChange={handleMediaSelect}
+              onChange={handleVideoSelect}
             />
             <div
-              onClick={uploadState === 'idle' ? () => mediaInputRef.current?.click() : undefined}
+              onClick={videoUploadState === 'idle' ? () => videoInputRef.current?.click() : undefined}
               style={{
-                borderRadius: 14, border: `2px dashed ${uploadState === 'done' ? '#10B981' : '#BFDBFE'}`,
-                background: uploadState === 'done' ? 'rgba(16,185,129,0.04)' : '#fff',
+                borderRadius: 14, border: `2px dashed ${videoUploadState === 'done' ? '#10B981' : '#BFDBFE'}`,
+                background: videoUploadState === 'done' ? 'rgba(16,185,129,0.04)' : '#fff',
                 padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                cursor: uploadState === 'idle' ? 'pointer' : 'default',
+                cursor: videoUploadState === 'idle' ? 'pointer' : 'default',
               }}
             >
-              {uploadState === 'uploading' && (
+              {videoUploadState === 'uploading' && (
                 <>
                   <Loader size={28} color="#0284C7" style={{ animation: 'spin-slow 1s linear infinite' }} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#0284C7' }}>Uploading media…</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#0284C7' }}>Processing video…</span>
                 </>
               )}
-              {uploadState === 'done' && (
+              {videoUploadState === 'done' && videoFile && (
                 <>
                   <CheckCircle size={28} color="#10B981" />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#10B981' }}>{mediaFiles.length} file{mediaFiles.length > 1 ? 's' : ''} selected</span>
-                  <span style={{ fontSize: 11, color: '#64748B' }}>{mediaFiles.map(f => f.name).join(' · ')}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#10B981' }}>Video selected</span>
+                  <span style={{ fontSize: 11, color: '#64748B' }}>{videoFile.name}</span>
                 </>
               )}
-              {uploadState === 'idle' && (
+              {videoUploadState === 'idle' && (
                 <>
                   <div style={{ width: 48, height: 48, borderRadius: 14, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Upload size={22} color="#2563EB" />
+                    <Film size={22} color="#2563EB" />
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Tap to upload damage media</div>
-                    <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>Photos or videos · MP4, JPG, HEIC · Max 500MB</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Tap to upload video evidence</div>
+                    <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>MP4, MOV, AVI, WebM · Max 500MB</div>
                   </div>
                 </>
               )}
@@ -604,8 +732,63 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
           </>
         )}
 
-        {/* ── Step C: Voice Recording (mandatory) ── */}
+        {/* ── Step C: Image upload ── */}
         {step === 2 && (
+          <>
+            <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8 }}>
+              <Camera size={14} color="#2563EB" style={{ flexShrink: 0, marginTop: 1 }} />
+              <span style={{ fontSize: 11, color: '#1E40AF', lineHeight: 1.5 }}>
+                <strong>Required:</strong> Upload photos of the damage. These will be scanned by SyntheticShield AI for synthetic image detection.
+              </span>
+            </div>
+
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleImageSelect}
+            />
+            <div
+              onClick={imageUploadState === 'idle' ? () => imageInputRef.current?.click() : undefined}
+              style={{
+                borderRadius: 14, border: `2px dashed ${imageUploadState === 'done' ? '#10B981' : '#BFDBFE'}`,
+                background: imageUploadState === 'done' ? 'rgba(16,185,129,0.04)' : '#fff',
+                padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                cursor: imageUploadState === 'idle' ? 'pointer' : 'default',
+              }}
+            >
+              {imageUploadState === 'uploading' && (
+                <>
+                  <Loader size={28} color="#0284C7" style={{ animation: 'spin-slow 1s linear infinite' }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#0284C7' }}>Processing photos…</span>
+                </>
+              )}
+              {imageUploadState === 'done' && (
+                <>
+                  <CheckCircle size={28} color="#10B981" />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#10B981' }}>{imageFiles.length} photo{imageFiles.length > 1 ? 's' : ''} selected</span>
+                  <span style={{ fontSize: 11, color: '#64748B' }}>{imageFiles.map(f => f.name).join(' · ')}</span>
+                </>
+              )}
+              {imageUploadState === 'idle' && (
+                <>
+                  <div style={{ width: 48, height: 48, borderRadius: 14, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Camera size={22} color="#2563EB" />
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>Tap to upload damage photos</div>
+                    <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>JPG, PNG, HEIC · Multiple allowed</div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Step D: Voice Recording (mandatory) ── */}
+        {step === 3 && (
           <>
             <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8 }}>
               <Mic size={14} color="#2563EB" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -646,15 +829,16 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
               </div>
             </div>
 
+            {recordError && (
+              <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#B91C1C' }}>
+                {recordError}
+              </div>
+            )}
+
             {recordState === 'done' && (
-              <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button onClick={() => setPlaying(v => !v)} style={{ width: 30, height: 30, borderRadius: '50%', background: '#EFF6FF', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {playing ? <Pause size={12} color="#2563EB" /> : <Play size={12} color="#2563EB" />}
-                  </button>
-                  <span style={{ fontSize: 12, color: '#0F172A', fontFamily: 'monospace' }}>{fmt(recordSecs)}</span>
-                </div>
-                <button onClick={() => { setRecordState('idle'); setRecordSecs(0); setPlaying(false) }} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', fontSize: 12 }}>
+              <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {audioPlaybackUrl && <audio controls src={audioPlaybackUrl} style={{ width: '100%', height: 36 }} />}
+                <button onClick={resetRecording} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', fontSize: 12, alignSelf: 'flex-end' }}>
                   <RotateCcw size={12} /> Re-record
                 </button>
               </div>
@@ -662,8 +846,8 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
           </>
         )}
 
-        {/* ── Step D: PDF (optional) ── */}
-        {step === 3 && (
+        {/* ── Step E: PDF (optional) ── */}
+        {step === 4 && (
           <>
             <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8 }}>
               <FileText size={14} color="#D97706" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -712,15 +896,16 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
           </>
         )}
 
-        {/* ── Step E: Review & Submit ── */}
-        {step === 4 && (
+        {/* ── Step F: Review & Submit ── */}
+        {step === 5 && (
           <>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>Review your claim</div>
             {[
               { label: 'Coverage', value: coverage },
               { label: 'Location', value: location },
               { label: 'Description', value: description },
-              { label: 'Evidence', value: uploadState === 'done' ? '3 files uploaded ✓' : 'None' },
+              { label: 'Video', value: videoUploadState === 'done' && videoFile ? `${videoFile.name} ✓` : 'None' },
+              { label: 'Photos', value: imageUploadState === 'done' ? `${imageFiles.length} photo${imageFiles.length > 1 ? 's' : ''} ✓` : 'None' },
               { label: 'Voice Statement', value: recordState === 'done' ? `${fmt(recordSecs)} recorded ✓` : 'None' },
               { label: 'Supporting Doc', value: pdfState === 'done' ? pdfName : 'Skipped (optional)' },
             ].map(({ label, value }) => (
@@ -747,30 +932,65 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: () => void; onBack: (
           disabled={!canNext || submitting}
           style={{ flex: 2, background: 'linear-gradient(135deg,#0284C7,#2563EB)', fontSize: 14, padding: '13px' }}
         >
-          {submitting ? <><Loader size={15} style={{ animation: 'spin-slow 1s linear infinite' }} /> Submitting…</> : step === 4 ? 'Submit Claim' : 'Continue'} {step < 4 && !submitting && <ChevronRight size={15} />}
+          {submitting ? <><Loader size={15} style={{ animation: 'spin-slow 1s linear infinite' }} /> Submitting…</> : step === 5 ? 'Submit Claim' : 'Continue'} {step < 5 && !submitting && <ChevronRight size={15} />}
         </Btn>
+        {submitError && (
+          <div style={{ marginTop: 8, background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#B91C1C', textAlign: 'center' }}>
+            {submitError}
+          </div>
+        )}
       </div>
     </PhoneFrame>
   )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Screen 5 — AI Verification
+// Screen 5 — AI Verification (polls real claim status)
 // ═══════════════════════════════════════════════════════════════════════════════
-function AIVerifying({ onDone }: { onDone: (o: Outcome) => void }) {
+const STATUS_TO_OUTCOME: Record<string, Outcome> = {
+  auto_approved: 'approved',
+  moderator_review: 'review',
+  siu_investigation: 'siu',
+  siu_confirmed_fraud: 'siu',
+  siu_cleared: 'approved',
+  rejected: 'review',
+}
+
+function AIVerifying({ claimDbId, onDone }: { claimDbId: number; onDone: (o: Outcome) => void }) {
   const [progress, setProgress] = useState([0, 0, 0])
-  const outcomes: Outcome[] = ['siu', 'approved', 'review']
-  const outcomeIdx = useRef(Math.floor(Math.random() * 3))
 
   useEffect(() => {
     const timers = [
       setTimeout(() => setProgress([100, 0, 0]), 600),
       setTimeout(() => setProgress([100, 100, 0]), 1500),
       setTimeout(() => setProgress([100, 100, 100]), 2600),
-      setTimeout(() => onDone(outcomes[outcomeIdx.current]), 3600),
     ]
-    return () => timers.forEach(clearTimeout)
-  }, [])
+
+    // Poll the backend until AI analysis resolves the claim status
+    // (real vendor analysis can take a few minutes)
+    const token = sessionStorage.getItem('ss_token')
+    let attempts = 0
+    const poll = setInterval(async () => {
+      attempts++
+      try {
+        const res = await fetch(`http://localhost:8000/claims/${claimDbId}`, { headers: { Authorization: `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.status && data.status !== 'processing') {
+            clearInterval(poll)
+            onDone(STATUS_TO_OUTCOME[data.status] ?? 'review')
+            return
+          }
+        }
+      } catch { /* retry on next tick */ }
+      if (attempts >= 150) {
+        clearInterval(poll)
+        onDone('review')
+      }
+    }, 2000)
+
+    return () => { timers.forEach(clearTimeout); clearInterval(poll) }
+  }, [claimDbId])
 
   const checks = [
     { label: 'Frame-level diffusion analysis', done: progress[0] === 100 },
@@ -827,7 +1047,7 @@ function OutcomeScreen({ outcome, claimId, onContinue }: { outcome: Outcome; cla
       icon: <CheckCircle size={40} color="#10B981" />,
       bg: '#F0FDF4', border: '#BBF7D0', title: 'Claim Approved',
       subtitle: 'Your claim has been automatically verified and approved.',
-      detail: 'Estimated payout of $3,850 will be processed within 2 business days.',
+      detail: 'Your payout is being processed and will arrive within 2 business days.',
       color: '#059669',
     },
     review: {
@@ -1074,7 +1294,6 @@ function ReAppealScreen({ claimId, onSubmit, onBack }: { claimId: string; onSubm
               <CheckCircle size={20} color="#10B981" style={{ flexShrink: 0 }} />
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#10B981' }}>Evidence attached</div>
-                <div style={{ fontSize: 11, color: '#64748B' }}>2 additional files uploaded</div>
               </div>
             </>
           )}
@@ -1119,12 +1338,19 @@ function ReAppealScreen({ claimId, onSubmit, onBack }: { claimId: string; onSubm
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MobilePortal() {
   const [screen, setScreen] = useState<Screen>('login')
-  const [outcome, setOutcome] = useState<Outcome>('siu')
-  const [claimId] = useState('CLM-2026-00042')
+  const [outcome, setOutcome] = useState<Outcome>('review')
+  const [claimDbId, setClaimDbId] = useState<number | null>(null)
+  const [claimId, setClaimId] = useState('')
   const [loginIdentifier, setLoginIdentifier] = useState('')
   const [debugOtp, setDebugOtp] = useState<string | null>(null)
 
   const handleOutcome = (o: Outcome) => { setOutcome(o); setScreen('outcome') }
+
+  const handleClaimSubmitted = (dbId: number, claimNumber: string) => {
+    setClaimDbId(dbId)
+    setClaimId(claimNumber)
+    setScreen('verifying')
+  }
 
   const handleLoginNext = (identifier: string, otp: string | null) => {
     setLoginIdentifier(identifier)
@@ -1137,8 +1363,8 @@ export default function MobilePortal() {
       case 'login':         return <LoginScreen onNext={handleLoginNext} />
       case 'otp':           return <OTPScreen onNext={() => setScreen('policy')} onBack={() => setScreen('login')} identifier={loginIdentifier} debugOtp={debugOtp} />
       case 'policy':        return <PolicyDashboard onSubmitClaim={() => setScreen('claim')} />
-      case 'claim':         return <ClaimSubmission onSubmit={() => setScreen('verifying')} onBack={() => setScreen('policy')} />
-      case 'verifying':     return <AIVerifying onDone={handleOutcome} />
+      case 'claim':         return <ClaimSubmission onSubmit={handleClaimSubmitted} onBack={() => setScreen('policy')} />
+      case 'verifying':     return claimDbId != null ? <AIVerifying claimDbId={claimDbId} onDone={handleOutcome} /> : <PolicyDashboard onSubmitClaim={() => setScreen('claim')} />
       case 'outcome':       return <OutcomeScreen outcome={outcome} claimId={claimId} onContinue={() => setScreen('confirmation')} />
       case 'confirmation':  return <ConfirmationScreen outcome={outcome} claimId={claimId} onHome={() => setScreen('policy')} onReappeal={outcome === 'siu' ? () => setScreen('reappeal') : undefined} />
       case 'reappeal':       return <ReAppealScreen claimId={claimId} onSubmit={() => setScreen('policy')} onBack={() => setScreen('confirmation')} />

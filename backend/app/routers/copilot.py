@@ -19,11 +19,11 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/{claim_id}/copilot-chat")
-def copilot_chat(claim_id: int, body: ChatRequest, db: DBSession = Depends(get_db)):
-    response = copilot_respond(claim_id, body.officer_id, body.message, db)
+async def copilot_chat(claim_id: int, body: ChatRequest, db: DBSession = Depends(get_db)):
+    response = await copilot_respond(claim_id, body.officer_id, body.message, db)
     log_event(db, claim_id, "officer", "copilot_query", actor_id=str(body.officer_id),
               details={"question": body.message[:100], "response_length": len(response)})
-    return {"claim_id": claim_id, "response": response}
+    return {"claim_id": claim_id, "role": "assistant", "content": response, "response": response}
 
 
 @router.get("/{claim_id}/copilot-history")

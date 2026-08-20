@@ -75,6 +75,7 @@ class Claim(Base):
     accident_location = Column(String)
     accident_description = Column(Text)
     video_url = Column(String)
+    image_url = Column(String)
     audio_url = Column(String)
     transcript_text = Column(Text)
     status = Column(String, nullable=False, default="processing")

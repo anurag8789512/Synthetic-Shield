@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     IMAGE_DETECTION_PROVIDER: str = "mock"
     TEXT_DETECTION_PROVIDER: str = "mock"
     REALITY_DEFENDER_API_KEY: str = ""
+    RESEMBLE_AI_API_KEY: str = ""
+
+    # Copilot LLM (provider-swappable)
+    COPILOT_LLM_PROVIDER: str = "mistral"  # mistral | gemini | mock
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    MISTRAL_API_KEY: str = ""
+    MISTRAL_MODEL: str = "mistral-small-latest"
+    SERPAPI_API_KEY: str = ""
 
     # Adjudication thresholds
     AUTO_APPROVE_BELOW: int = 15

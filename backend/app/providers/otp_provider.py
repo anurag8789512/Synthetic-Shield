@@ -20,7 +20,7 @@ def _is_email(identifier: str) -> bool:
 
 def _send_sms_sync(phone: str, code: str) -> str:
     """Send OTP via 2Factor.in AUTOGEN2 (SMS only). Returns the OTP that was sent."""
-    with httpx.Client(timeout=10.0, verify=False) as client:
+    with httpx.Client(timeout=10.0) as client:
         url = f"https://2factor.in/API/V1/{settings.TWOFACTOR_API_KEY}/SMS/{phone}/AUTOGEN2"
         resp = client.get(url)
         print(f"[2FACTOR] Status: {resp.status_code}, Body: {resp.text[:200]}")
@@ -34,7 +34,7 @@ def _send_sms_sync(phone: str, code: str) -> str:
 
 
 def _send_email_sync(email: str, code: str) -> None:
-    with httpx.Client(timeout=10.0, verify=False) as client:
+    with httpx.Client(timeout=10.0) as client:
         resp = client.post(
             "https://api.resend.com/emails",
             headers={

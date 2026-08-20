@@ -16,6 +16,13 @@ backend/.env
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
+frontend/*/node_modules/
+frontend/*/dist/
+frontend/*/.vite/
+frontend/*/build/
+
+# Vector store (binary, regenerated at runtime)
+backend/app/chroma_store/
 
 # OS junk
 .DS_Store

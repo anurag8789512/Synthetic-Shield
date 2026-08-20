@@ -8,10 +8,6 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
-  root: '.',
-  build: {
-    rollupOptions: { input: 'dashboard.html' },
-  },
   server: {
     host: '0.0.0.0',
     port: 3000,

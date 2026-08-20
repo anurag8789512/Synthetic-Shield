@@ -1,30 +1,47 @@
 """
 Detection Agent: runs per-modality analysis, aggregates scores, produces artifact_report.
+Providers are selected per modality via env config; real providers fall back to
+mock automatically if the vendor call fails, so the pipeline never stalls.
 """
 import json
+from pathlib import Path
+
 from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
 from app.models import Claim, ClaimMediaAnalysis
-from app.providers.detection import mock_providers
-
-# Import real providers (used when configured)
-if settings.VIDEO_DETECTION_PROVIDER == "reality_defender":
-    from app.providers.detection import reality_defender as video_provider
-else:
-    video_provider = None
+from app.providers.detection import mock_providers, reality_defender, resemble_ai
 
 
-async def _analyze_video(filename: str, content: bytes) -> dict:
-    if video_provider:
-        return await video_provider.analyze_video(filename, content)
-    return await mock_providers.analyze_video(filename, content)
+async def _run_provider(provider_name: str, kind: str, *args) -> tuple[str, dict]:
+    """Run the configured provider for a modality. Returns (provider_used, result)."""
+    if provider_name == "reality_defender" and settings.REALITY_DEFENDER_API_KEY:
+        try:
+            fn = getattr(reality_defender, f"analyze_{kind}")
+            result = await fn(*args)
+            print(f"[DETECTION] reality_defender {kind}: score={result['raw_score']} status={result.get('vendor_status')}")
+            return "reality_defender", result
+        except Exception as e:
+            print(f"[DETECTION] reality_defender {kind} failed ({e}) — falling back to mock")
+    if provider_name == "resemble_ai" and settings.RESEMBLE_AI_API_KEY:
+        try:
+            fn = getattr(resemble_ai, f"analyze_{kind}", None)
+            if fn is None:
+                raise AttributeError(f"resemble_ai has no analyze_{kind}")
+            result = await fn(*args)
+            return "resemble_ai", result
+        except Exception as e:
+            print(f"[DETECTION] resemble_ai {kind} failed ({e}) — falling back to mock")
+    fn = getattr(mock_providers, f"analyze_{kind}")
+    return "mock", await fn(*args)
 
 
-async def _analyze_image(filename: str, content: bytes) -> dict:
-    if video_provider and settings.IMAGE_DETECTION_PROVIDER == "reality_defender":
-        return await video_provider.analyze_image(filename, content)
-    return await mock_providers.analyze_image(filename, content)
+def _media_bytes(claim_number: str, url: str | None) -> tuple[str, bytes]:
+    """Resolve a media URL to (filename, file bytes) from the local media store."""
+    filename = url.split("/")[-1] if url else "unknown"
+    media_path = Path("app/media_store") / claim_number / filename
+    content = media_path.read_bytes() if media_path.exists() else filename.encode()
+    return filename, content
 
 
 async def run_detection(claim_id: int, db: DBSession) -> float:
@@ -37,16 +54,12 @@ async def run_detection(claim_id: int, db: DBSession) -> float:
 
     # Video analysis
     if claim.video_url:
-        filename = claim.video_url.split("/")[-1] if claim.video_url else "unknown.mp4"
-        # Load real file content for real providers, dummy for mock
-        from pathlib import Path
-        media_path = Path("app/media_store") / claim.claim_number / filename
-        content = media_path.read_bytes() if media_path.exists() else filename.encode()
-        video_result = await _analyze_video(filename, content)
+        filename, content = _media_bytes(claim.claim_number, claim.video_url)
+        provider, video_result = await _run_provider(settings.VIDEO_DETECTION_PROVIDER, "video", filename, content)
         db.add(ClaimMediaAnalysis(
             claim_id=claim_id,
             modality="video",
-            provider=settings.VIDEO_DETECTION_PROVIDER,
+            provider=provider,
             raw_score=video_result["raw_score"],
             findings_json=json.dumps(video_result),
         ))
@@ -54,27 +67,25 @@ async def run_detection(claim_id: int, db: DBSession) -> float:
 
     # Audio analysis
     if claim.audio_url:
-        filename = claim.audio_url.split("/")[-1] if claim.audio_url else "unknown.wav"
-        audio_result = await mock_providers.analyze_audio(filename, filename.encode())
+        filename, content = _media_bytes(claim.claim_number, claim.audio_url)
+        provider, audio_result = await _run_provider(settings.AUDIO_DETECTION_PROVIDER, "audio", filename, content)
         db.add(ClaimMediaAnalysis(
             claim_id=claim_id,
             modality="audio",
-            provider=settings.AUDIO_DETECTION_PROVIDER,
+            provider=provider,
             raw_score=audio_result["raw_score"],
             findings_json=json.dumps(audio_result),
         ))
         results.append(("audio", audio_result["raw_score"], 0.30))
 
-    # Image analysis (reuse video file as image evidence)
-    if claim.video_url:
-        filename = claim.video_url.split("/")[-1]
-        media_path = Path("app/media_store") / claim.claim_number / filename
-        content = media_path.read_bytes() if media_path.exists() else filename.encode()
-        image_result = await _analyze_image(filename, content)
+    # Image analysis (from dedicated image file)
+    if claim.image_url:
+        filename, content = _media_bytes(claim.claim_number, claim.image_url)
+        provider, image_result = await _run_provider(settings.IMAGE_DETECTION_PROVIDER, "image", filename, content)
         db.add(ClaimMediaAnalysis(
             claim_id=claim_id,
             modality="image",
-            provider=settings.IMAGE_DETECTION_PROVIDER,
+            provider=provider,
             raw_score=image_result["raw_score"],
             findings_json=json.dumps(image_result),
         ))
@@ -82,11 +93,11 @@ async def run_detection(claim_id: int, db: DBSession) -> float:
 
     # Text analysis (claim narrative)
     if claim.accident_description:
-        text_result = await mock_providers.analyze_text(claim.accident_description)
+        provider, text_result = await _run_provider(settings.TEXT_DETECTION_PROVIDER, "text", claim.accident_description)
         db.add(ClaimMediaAnalysis(
             claim_id=claim_id,
             modality="text",
-            provider=settings.TEXT_DETECTION_PROVIDER,
+            provider=provider,
             raw_score=text_result["raw_score"],
             findings_json=json.dumps(text_result),
         ))
@@ -177,7 +188,7 @@ async def run_detection(claim_id: int, db: DBSession) -> float:
         recommendation = "Route to SIU investigator for immediate review."
         summary = f"High-confidence synthetic indicators found in {', '.join(f.capitalize() for f in high_signals) if high_signals else 'multiple modalities'}. This claim shows strong evidence of fabricated evidence."
 
-    artifact_report = json.dumps({
+    report_dict = {
         "fraud_confidence_score": aggregated,
         "summary": summary,
         "recommendation": recommendation,
@@ -185,7 +196,13 @@ async def run_detection(claim_id: int, db: DBSession) -> float:
         "modality_reports": modality_reports,
         "total_modalities_analyzed": len(results),
         "flagged_modalities": [r["modality"] for r in modality_reports if r["severity"] != "low"],
-    })
+    }
+
+    # LLM narrative layer: turn raw detector scores into officer-readable text
+    from app.agents.report_synthesizer import synthesize_report
+    report_dict = await synthesize_report(report_dict)
+
+    artifact_report = json.dumps(report_dict)
 
     # Update claim
     claim.fraud_confidence_score = aggregated
