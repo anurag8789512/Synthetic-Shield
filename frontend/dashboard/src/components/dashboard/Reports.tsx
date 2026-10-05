@@ -79,7 +79,7 @@ export default function Reports() {
   if (loaded && reports.length === 0) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: C.bg, gap: 10 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#F9EEF1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <FileText size={24} color={C.blue} />
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>No reports yet</div>
@@ -118,10 +118,10 @@ export default function Reports() {
         {visible.map((r, i) => {
           const sel = selected === r.id
           return (
-            <div key={r.id} style={{ borderBottom: i < visible.length - 1 ? `1px solid #F8FAFC` : 'none' }}>
+            <div key={r.id} style={{ borderBottom: i < visible.length - 1 ? `1px solid #FFFFFF` : 'none' }}>
               <div
                 onClick={() => setSelected(sel ? null : r.id)}
-                style={{ display: 'grid', gridTemplateColumns: '1fr 120px 80px 110px 24px', padding: '12px 16px', alignItems: 'center', cursor: 'pointer', background: sel ? '#EFF6FF' : '#fff', transition: 'background 0.1s' }}
+                style={{ display: 'grid', gridTemplateColumns: '1fr 120px 80px 110px 24px', padding: '12px 16px', alignItems: 'center', cursor: 'pointer', background: sel ? '#F9EEF1' : '#fff', transition: 'background 0.1s' }}
               >
                 <div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

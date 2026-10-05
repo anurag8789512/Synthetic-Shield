@@ -126,10 +126,10 @@ function FraudGauge({ score }: { score: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <svg width={132} height={116} viewBox="0 0 132 116">
-        <path d={arc(startAngle, arcAngle)} fill="none" stroke="#F1F5F9" strokeWidth={sw} strokeLinecap="round" />
+        <path d={arc(startAngle, arcAngle)} fill="none" stroke="#F3F0F1" strokeWidth={sw} strokeLinecap="round" />
         <path d={arc(startAngle, (score / 100) * arcAngle)} fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" />
         <text x={cx} y={cy - 5} textAnchor="middle" fontSize={24} fontWeight={800} fill={color} fontFamily="Inter, system-ui, sans-serif">{score}%</text>
-        <text x={cx} y={cx + 13} textAnchor="middle" fontSize={8} fill="#94A3B8" fontFamily="Inter, system-ui, sans-serif" letterSpacing="0.06em">FRAUD SCORE</text>
+        <text x={cx} y={cx + 13} textAnchor="middle" fontSize={8} fill="#8A8A8A" fontFamily="Inter, system-ui, sans-serif" letterSpacing="0.06em">FRAUD SCORE</text>
       </svg>
       <StatusPill status={scoreToStatus(score)} size="xs" />
     </div>
@@ -202,16 +202,16 @@ function AICopilot({ claim }: { claim: Claim }) {
           <div key={i} style={{ display: 'flex', justifyContent: m.from === 'user' ? 'flex-end' : 'flex-start' }}>
             <div style={{
               maxWidth: '85%', padding: '7px 10px', borderRadius: m.from === 'user' ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-              background: m.from === 'user' ? '#EFF6FF' : '#F8FAFC',
-              border: `1px solid ${m.from === 'user' ? '#BFDBFE' : C.border}`,
-              fontSize: 11, lineHeight: 1.5, color: m.from === 'user' ? '#1E40AF' : C.text,
+              background: m.from === 'user' ? '#F9EEF1' : '#FFFFFF',
+              border: `1px solid ${m.from === 'user' ? '#E7C3CD' : C.border}`,
+              fontSize: 11, lineHeight: 1.5, color: m.from === 'user' ? '#4A0012' : C.text,
             }}>
               {m.text}
             </div>
           </div>
         ))}
         {typing && (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '7px 10px', background: '#F8FAFC', border: `1px solid ${C.border}`, borderRadius: '10px 10px 10px 2px', width: 52 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '7px 10px', background: '#FFFFFF', border: `1px solid ${C.border}`, borderRadius: '10px 10px 10px 2px', width: 52 }}>
             {[0, 0.2, 0.4].map((d, i) => (
               <div key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: C.mutedLight, animation: `wave-bar 0.7s ${d}s ease-in-out infinite alternate` }} />
             ))}
@@ -222,7 +222,7 @@ function AICopilot({ claim }: { claim: Claim }) {
       {historyLoaded && !hasUserMessages && (
         <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 4, paddingTop: 6, paddingBottom: 6 }}>
           {SUGGESTED.map(q => (
-            <button key={q} onClick={() => ask(q)} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 20, background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#2563EB', cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button key={q} onClick={() => ask(q)} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 20, background: '#F9EEF1', border: '1px solid #E7C3CD', color: '#800020', cursor: 'pointer', fontFamily: 'inherit' }}>
               {q}
             </button>
           ))}
@@ -234,7 +234,7 @@ function AICopilot({ claim }: { claim: Claim }) {
           value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && ask(input)}
           placeholder="Ask the AI a question…"
-          style={{ flex: 1, height: 32, background: '#F8FAFC', border: `1px solid ${C.border}`, borderRadius: 7, fontSize: 11, padding: '0 10px', outline: 'none', fontFamily: 'inherit', color: C.text }}
+          style={{ flex: 1, height: 32, background: '#FFFFFF', border: `1px solid ${C.border}`, borderRadius: 7, fontSize: 11, padding: '0 10px', outline: 'none', fontFamily: 'inherit', color: C.text }}
         />
         <button onClick={() => ask(input)} style={{ width: 32, height: 32, borderRadius: 7, background: C.blue, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Send size={13} color="#fff" />
@@ -341,7 +341,7 @@ function SIUVoting({ claim }: { claim: Claim }) {
                   <input
                     value={notes[o.id] || ''} onChange={e => setNotes(n => ({ ...n, [o.id]: e.target.value }))}
                     placeholder="Optional notes…"
-                    style={{ flex: 1, boxSizing: 'border-box' as const, fontSize: 10, padding: '5px 8px', borderRadius: 5, border: `1px solid ${C.border}`, background: '#F8FAFC', color: C.text, outline: 'none', fontFamily: 'inherit' }}
+                    style={{ flex: 1, boxSizing: 'border-box' as const, fontSize: 10, padding: '5px 8px', borderRadius: 5, border: `1px solid ${C.border}`, background: '#FFFFFF', color: C.text, outline: 'none', fontFamily: 'inherit' }}
                   />
                   <button onClick={() => submitVote(o.id)} style={{ fontSize: 10, fontWeight: 700, padding: '5px 10px', borderRadius: 5, border: 'none', background: C.blue, color: '#fff', cursor: 'pointer' }}>
                     Cast Vote
@@ -486,7 +486,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
   if (loaded && CLAIMS.length === 0) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: C.bg, gap: 10 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#F9EEF1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Inbox size={24} color={C.blue} />
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>No claims yet</div>
@@ -523,7 +523,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           </div>
           <div style={{ display: 'flex', gap: 3 }}>
             {(['all', 'high', 'medium', 'low'] as const).map(f => (
-              <button key={f} onClick={() => setFilter(f)} style={{ flex: 1, padding: '3px 0', borderRadius: 5, fontSize: 9, fontWeight: 600, border: `1px solid ${filter === f ? C.blue : C.border}`, background: filter === f ? '#EFF6FF' : '#fff', color: filter === f ? C.blue : C.muted, cursor: 'pointer', textTransform: 'capitalize' as const }}>
+              <button key={f} onClick={() => setFilter(f)} style={{ flex: 1, padding: '3px 0', borderRadius: 5, fontSize: 9, fontWeight: 600, border: `1px solid ${filter === f ? C.blue : C.border}`, background: filter === f ? '#F9EEF1' : '#fff', color: filter === f ? C.blue : C.muted, cursor: 'pointer', textTransform: 'capitalize' as const }}>
                 {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
@@ -533,7 +533,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           {visible.map(c => {
             const sel = claim.id === c.id
             return (
-              <div key={c.id} onClick={() => setSelected(c.id)} style={{ borderRadius: 8, padding: '10px 11px', marginBottom: 4, border: `1px solid ${sel ? '#BFDBFE' : '#F1F5F9'}`, background: sel ? '#EFF6FF' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
+              <div key={c.id} onClick={() => setSelected(c.id)} style={{ borderRadius: 8, padding: '10px 11px', marginBottom: 4, border: `1px solid ${sel ? '#E7C3CD' : '#F3F0F1'}`, background: sel ? '#F9EEF1' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{c.name}</div>
@@ -543,17 +543,17 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <Car size={9} color="#CBD5E1" />
+                    <Car size={9} color="#C8C8C8" />
                     <span style={{ fontSize: 10, color: C.mutedLight }}>{c.incidentType}</span>
                     {c.isLive && <span style={{ fontSize: 8, fontWeight: 700, background: '#FEE2E2', color: C.red, border: '1px solid #FECACA', borderRadius: 3, padding: '0 4px' }}>LIVE</span>}
                     {c.queueAction === 'review_only' && <span style={{ fontSize: 8, fontWeight: 700, background: '#F0FDF4', color: C.green, border: '1px solid #BBF7D0', borderRadius: 3, padding: '0 4px' }}>REVIEW ONLY</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <Clock size={9} color="#CBD5E1" />
-                    <span style={{ fontSize: 9, color: '#CBD5E1' }}>{c.time}</span>
+                    <Clock size={9} color="#C8C8C8" />
+                    <span style={{ fontSize: 9, color: '#C8C8C8' }}>{c.time}</span>
                   </div>
                 </div>
-                <div style={{ height: 2, background: '#F1F5F9', borderRadius: 1, marginTop: 7, overflow: 'hidden' }}>
+                <div style={{ height: 2, background: '#F3F0F1', borderRadius: 1, marginTop: 7, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${c.score}%`, background: c.score > 85 ? C.red : c.score >= 15 ? C.amber : C.green, borderRadius: 1 }} />
                 </div>
               </div>
@@ -570,7 +570,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
             <div style={{ fontSize: 10, color: C.mutedLight, fontFamily: 'monospace', marginTop: 1 }}>{claim.id} · {claim.name}</div>
           </div>
           {/* Overlay toggle */}
-          <button onClick={() => setShowOverlay(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: showOverlay ? '#EFF6FF' : '#fff', border: `1px solid ${showOverlay ? '#BFDBFE' : C.border}`, borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: showOverlay ? C.blue : C.muted }}>
+          <button onClick={() => setShowOverlay(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: showOverlay ? '#F9EEF1' : '#fff', border: `1px solid ${showOverlay ? '#E7C3CD' : C.border}`, borderRadius: 7, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: showOverlay ? C.blue : C.muted }}>
             {showOverlay ? <Layers size={13} /> : <Eye size={13} />}
             {showOverlay ? 'Heatmap ON' : 'Heatmap OFF'}
           </button>
@@ -651,7 +651,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           {/* Sub-nav */}
           <div style={{ display: 'flex', gap: 2, marginTop: 8 }}>
             {([['analysis', 'Findings'], ['copilot', 'AI Copilot'], ['voting', claim.backendStatus === 'siu_investigation' ? 'SIU Vote' : claim.queueAction === 'review_only' ? 'Details' : 'Actions']] as const).map(([id, label]) => (
-              <button key={id} onClick={() => setRightSection(id as typeof rightSection)} style={{ flex: 1, padding: '4px 0', borderRadius: 5, border: `1px solid ${rightSection === id ? C.blue : C.border}`, background: rightSection === id ? '#EFF6FF' : '#fff', color: rightSection === id ? C.blue : C.muted, fontSize: 10, fontWeight: rightSection === id ? 700 : 400, cursor: 'pointer' }}>
+              <button key={id} onClick={() => setRightSection(id as typeof rightSection)} style={{ flex: 1, padding: '4px 0', borderRadius: 5, border: `1px solid ${rightSection === id ? C.blue : C.border}`, background: rightSection === id ? '#F9EEF1' : '#fff', color: rightSection === id ? C.blue : C.muted, fontSize: 10, fontWeight: rightSection === id ? 700 : 400, cursor: 'pointer' }}>
                 {label}
               </button>
             ))}
@@ -693,7 +693,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
                   : (
                     <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
                       {claim.auditTrail.map((e, i, a) => (
-                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', borderBottom: i < a.length - 1 ? `1px solid #F8FAFC` : 'none' }}>
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', borderBottom: i < a.length - 1 ? `1px solid #FFFFFF` : 'none' }}>
                           <div style={{ width: 6, height: 6, borderRadius: '50%', background: i === 0 ? C.green : C.primary, marginTop: 3, flexShrink: 0 }} />
                           <span style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace', flexShrink: 0 }}>{e.time}</span>
                           <span style={{ fontSize: 10, color: C.textSub, lineHeight: 1.4 }}>{e.event}</span>
@@ -709,7 +709,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           {/* ── AI Copilot ── */}
           {rightSection === 'copilot' && (
             <>
-              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#1E40AF' }}>
+              <div style={{ background: '#F9EEF1', border: '1px solid #E7C3CD', borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#4A0012' }}>
                 AI Copilot is scoped to <strong>{claim.id}</strong>. Ask anything about this claim's findings.
               </div>
               <AICopilot key={claim.id} claim={claim} />

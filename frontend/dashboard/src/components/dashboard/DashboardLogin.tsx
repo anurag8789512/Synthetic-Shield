@@ -34,11 +34,11 @@ export default function DashboardLogin({ onLogin }: { onLogin: (role: string) =>
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FFFFFF', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ width: 400, background: '#fff', borderRadius: 16, border: `1px solid ${C.border}`, boxShadow: '0 8px 32px rgba(0,0,0,0.06)', padding: '40px 36px' }}>
         {/* Logo & Title */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 4px 16px rgba(37,99,235,0.25)' }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 4px 16px rgba(128,0,32,0.25)' }}>
             <Shield size={24} color="#fff" />
           </div>
           <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>SyntheticShield</div>

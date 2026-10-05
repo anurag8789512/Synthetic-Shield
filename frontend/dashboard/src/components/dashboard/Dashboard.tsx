@@ -123,7 +123,7 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: tab === t.id ? '#EFF6FF' : 'transparent',
+              background: tab === t.id ? '#F9EEF1' : 'transparent',
               color: tab === t.id ? C.blue : C.muted,
               fontSize: 12, fontWeight: tab === t.id ? 700 : 400,
               transition: 'all 0.15s',
@@ -153,7 +153,7 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
             onClick={() => { setNotifOpen(v => !v); setNotifCount(0) }}
             style={{
               width: 34, height: 34, borderRadius: 8, border: `1px solid ${C.border}`,
-              background: notifOpen ? '#EFF6FF' : '#fff',
+              background: notifOpen ? '#F9EEF1' : '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', position: 'relative',
             }}
           >
@@ -177,13 +177,13 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
                 <div
                   key={i}
                   onClick={() => { setTab('queue'); setNotifOpen(false) }}
-                  style={{ padding: '10px 14px', borderBottom: i < notifications.length - 1 ? `1px solid #F8FAFC` : 'none', display: 'flex', gap: 10, cursor: 'pointer', transition: 'background 0.1s' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                  style={{ padding: '10px 14px', borderBottom: i < notifications.length - 1 ? `1px solid #FFFFFF` : 'none', display: 'flex', gap: 10, cursor: 'pointer', transition: 'background 0.1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#FFFFFF')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <div style={{ width: 6, height: 6, background: n.dot, borderRadius: '50%', marginTop: 4, flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: '#334155', lineHeight: 1.4 }}>{n.text}</div>
+                    <div style={{ fontSize: 11, color: '#2E2E2E', lineHeight: 1.4 }}>{n.text}</div>
                     <div style={{ fontSize: 9, color: C.mutedLight, marginTop: 2 }}>{n.time}</div>
                   </div>
                   <div style={{ fontSize: 9, color: C.blue, fontWeight: 600, alignSelf: 'center' }}>View →</div>
@@ -200,7 +200,7 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
             title="MCP Server — connect external insurance systems"
             style={{
               height: 34, borderRadius: 8, border: `1px solid ${mcpOpen ? C.blue : C.border}`,
-              background: mcpOpen ? '#EFF6FF' : '#fff', display: 'flex', alignItems: 'center',
+              background: mcpOpen ? '#F9EEF1' : '#fff', display: 'flex', alignItems: 'center',
               gap: 6, padding: '0 10px', cursor: 'pointer',
             }}
           >
@@ -235,7 +235,7 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
                   key={label}
                   onClick={() => setMcpOpen(false)}
                   style={{ padding: '9px 14px', display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', transition: 'background 0.1s' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#FFFFFF')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <Icon size={13} color={C.muted} />
@@ -254,7 +254,7 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
         <div ref={profileRef} style={{ position: 'relative' }}>
           <div
             onClick={() => { setProfileOpen(v => !v); setMcpOpen(false) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: profileOpen ? '#EFF6FF' : C.bg, border: `1px solid ${profileOpen ? C.blue : C.border}`, borderRadius: 8, padding: '5px 10px 5px 6px', cursor: 'pointer' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: profileOpen ? '#F9EEF1' : C.bg, border: `1px solid ${profileOpen ? C.blue : C.border}`, borderRadius: 8, padding: '5px 10px 5px 6px', cursor: 'pointer' }}
           >
             <div style={{ width: 24, height: 24, borderRadius: 6, background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff' }}>{initialsOf(officerName)}</div>
             <div>

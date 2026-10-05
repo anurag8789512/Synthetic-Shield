@@ -19,7 +19,7 @@ export default function DashboardApp() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8FAFC' }}>
+    <div style={{ minHeight: '100vh', background: '#FFFFFF' }}>
       {authenticated ? <Dashboard role={officerRole} onLogout={handleLogout} /> : <DashboardLogin onLogin={handleLogin} />}
     </div>
   )

@@ -167,7 +167,7 @@ export default function CaseFiles() {
   if (loaded && cases.length === 0) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: C.bg, gap: 10 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: '#F9EEF1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <FolderOpen size={24} color={C.blue} />
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>No case files yet</div>
@@ -193,7 +193,7 @@ export default function CaseFiles() {
 
         <div style={{ display: 'flex', gap: 4, padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
           {OUTCOME_FILTERS.map(f => (
-            <button key={f.id} onClick={() => setOutcome(f.id)} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, border: `1px solid ${outcome === f.id ? C.blue : C.border}`, background: outcome === f.id ? '#EFF6FF' : '#fff', color: outcome === f.id ? C.blue : C.muted, cursor: 'pointer' }}>
+            <button key={f.id} onClick={() => setOutcome(f.id)} style={{ padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, border: `1px solid ${outcome === f.id ? C.blue : C.border}`, background: outcome === f.id ? '#F9EEF1' : '#fff', color: outcome === f.id ? C.blue : C.muted, cursor: 'pointer' }}>
               {f.label}
             </button>
           ))}
@@ -210,13 +210,13 @@ export default function CaseFiles() {
           {visible.map(c => {
             const sel = selected === c.id
             return (
-              <div key={c.id} style={{ borderBottom: `1px solid #F8FAFC` }}>
+              <div key={c.id} style={{ borderBottom: `1px solid #FFFFFF` }}>
                 <div
                   onClick={() => setSelected(sel ? null : c.id)}
                   style={{
                     display: 'grid', gridTemplateColumns: '120px 1fr 150px 80px 24px',
                     padding: '12px 16px', cursor: 'pointer', alignItems: 'center',
-                    background: sel ? '#EFF6FF' : '#fff',
+                    background: sel ? '#F9EEF1' : '#fff',
                     transition: 'background 0.1s',
                   }}
                 >
@@ -336,7 +336,7 @@ export default function CaseFiles() {
                             <SectionHeading>Audit Trail</SectionHeading>
                             <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
                               {c.auditTrail.map((e, i, a) => (
-                                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', borderBottom: i < a.length - 1 ? `1px solid #F8FAFC` : 'none' }}>
+                                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', borderBottom: i < a.length - 1 ? `1px solid #FFFFFF` : 'none' }}>
                                   <span style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace', flexShrink: 0 }}>{e.time}</span>
                                   <span style={{ fontSize: 10, color: C.textSub, lineHeight: 1.4 }}>{e.event}</span>
                                 </div>
