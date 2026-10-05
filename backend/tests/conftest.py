@@ -16,6 +16,7 @@ from app.main import app
 from app.models import (
     User, Policy, Coverage, OTPCode, Session, ClaimsOfficer, Claim, ClaimMediaAnalysis
 )
+from app.security import hash_password
 
 # ── In-memory DB ──────────────────────────────────────────────────────────────
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -87,11 +88,10 @@ def test_user(db) -> User:
 
 @pytest.fixture()
 def test_officer(db) -> ClaimsOfficer:
-    # dashboard_login compares password_hash directly to the submitted password
     officer = ClaimsOfficer(
         name="Officer One",
         email="officer@test.com",
-        password_hash="testpass123",
+        password_hash=hash_password("testpass123"),
         role="moderator",
     )
     db.add(officer)
@@ -107,7 +107,7 @@ def officer_token(db, test_officer, client) -> str:
         "email": test_officer.email,
         "password": "testpass123",
     })
-    return resp.json().get("token", "")
+    return resp.json().get("session_token", "")
 
 
 @pytest.fixture()
@@ -118,6 +118,7 @@ def user_session(db, test_user) -> str:
     session = Session(
         token=token,
         user_id=test_user.id,
+        owner_type="user",
         expires_at=datetime.utcnow() + timedelta(hours=12),
     )
     db.add(session)

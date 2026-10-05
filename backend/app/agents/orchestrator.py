@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
 from app.models import Claim, User, Payout
-from app.agents.detection_agent import run_detection
+from app.agents.scoring_adapter import run_fusion_scoring
 from app.agents.notification_agent import notify_claim_status
 from app.agents.audit_logger import log_event
 from app.agents.assignment_agent import assign_siu_officers, assign_moderator
 from app.agents.similarity_agent import process_claim_similarity
+from app.agents.valuation_agent import evaluate_claim_valuation
 from app.ws_manager import ws_manager
 
 
@@ -20,8 +21,8 @@ async def process_claim(claim_id: int, db: DBSession) -> None:
 
     log_event(db, claim_id, "system", "claim_received", details={"status": "processing"})
 
-    # Step 1: Run detection (sets fraud_confidence_score and status)
-    score = await run_detection(claim_id, db)
+    # Step 1: Fraud Fusion Scoring (sets fraud_confidence_score and status)
+    score = await run_fusion_scoring(claim_id, db)
 
     # Step 1b: Narrative similarity check
     try:
@@ -32,7 +33,7 @@ async def process_claim(claim_id: int, db: DBSession) -> None:
     except Exception as e:
         print(f"[SIMILARITY ERROR] Claim {claim_id}: {e}")
 
-    log_event(db, claim_id, "agent", "detection_completed", actor_id="detection_agent", details={
+    log_event(db, claim_id, "agent", "detection_completed", actor_id="fusion_scoring_engine", details={
         "fraud_confidence_score": score,
     })
 
@@ -54,21 +55,33 @@ async def process_claim(claim_id: int, db: DBSession) -> None:
 
     # Step 2: Route based on status (already set by detection_agent)
     if claim.status == "auto_approved":
+        # Detection cleared the claim as genuine — check the declared claim amount
+        # against a live market cost estimate for the damaged part before paying out.
+        try:
+            valuation = await evaluate_claim_valuation(claim, db)
+        except Exception as e:
+            print(f"[VALUATION ERROR] Claim {claim_id}: {e}")
+            valuation = {"method": "valuation_error", "approved_amount_cents": settings.MOCK_PAYOUT_AMOUNT_CENTS}
+
+        approved_amount_cents = valuation.get("approved_amount_cents", settings.MOCK_PAYOUT_AMOUNT_CENTS)
+
+        log_event(db, claim_id, "agent", "claim_amount_validated", actor_id="valuation_agent", details=valuation)
+
         # Initiate payout
         payout = Payout(
             claim_id=claim.id,
-            amount_cents=settings.MOCK_PAYOUT_AMOUNT_CENTS,
+            amount_cents=approved_amount_cents,
             status="initiated",
             transaction_id=f"TXN-{claim.claim_number}-{datetime.utcnow().strftime('%H%M%S')}",
             initiated_at=datetime.utcnow(),
         )
         db.add(payout)
-        claim.payout_amount_cents = settings.MOCK_PAYOUT_AMOUNT_CENTS
+        claim.payout_amount_cents = approved_amount_cents
         claim.payout_transaction_id = payout.transaction_id
         db.commit()
 
         log_event(db, claim_id, "system", "payout_initiated", details={
-            "amount_cents": settings.MOCK_PAYOUT_AMOUNT_CENTS,
+            "amount_cents": approved_amount_cents,
             "transaction_id": payout.transaction_id,
         })
 

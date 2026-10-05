@@ -488,6 +488,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
   const [coverage, setCoverage] = useState('')
   const [location, setLocation] = useState('')
   const [description, setDescription] = useState('')
+  const [claimAmount, setClaimAmount] = useState('')
   const [videoUploadState, setVideoUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [imageUploadState, setImageUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
@@ -512,7 +513,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
   const coverages = policy?.coverages ?? []
 
   const canNext =
-    step === 0 ? !!coverage && !!location && !!description :
+    step === 0 ? !!coverage && !!location && !!description && Number(claimAmount) > 0 :
     step === 1 ? videoUploadState === 'done' :
     step === 2 ? imageUploadState === 'done' :
     step === 3 ? recordState === 'done' :
@@ -597,6 +598,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
     formData.append('coverage_id', coverage)
     formData.append('accident_location', location)
     formData.append('accident_description', description)
+    formData.append('claim_amount', claimAmount)
 
     if (videoFile) {
       formData.append('video', videoFile)
@@ -675,6 +677,15 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
             </div>
             <FormInput label="Accident Location" placeholder="e.g. 47 Main St, Sydney NSW" value={location} onChange={setLocation} required />
             <FormInput label="Description of incident" placeholder="Briefly describe what happened…" value={description} onChange={setDescription} multiline rows={4} required />
+            <FormInput
+              label="Claim Amount"
+              placeholder="e.g. 850"
+              value={claimAmount}
+              onChange={v => setClaimAmount(v.replace(/[^0-9.]/g, ''))}
+              type="number"
+              hint="Enter the amount you're claiming, in USD."
+              required
+            />
           </>
         )}
 
@@ -904,6 +915,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
               { label: 'Coverage', value: coverage },
               { label: 'Location', value: location },
               { label: 'Description', value: description },
+              { label: 'Claim Amount', value: claimAmount ? `$${Number(claimAmount).toLocaleString()}` : '' },
               { label: 'Video', value: videoUploadState === 'done' && videoFile ? `${videoFile.name} ✓` : 'None' },
               { label: 'Photos', value: imageUploadState === 'done' ? `${imageFiles.length} photo${imageFiles.length > 1 ? 's' : ''} ✓` : 'None' },
               { label: 'Voice Statement', value: recordState === 'done' ? `${fmt(recordSecs)} recorded ✓` : 'None' },
@@ -923,7 +935,9 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
         {step > 0 && (
           <Btn variant="outline" onClick={goPrev} style={{ flex: 1 }}>Back</Btn>
         )}
-        {step === 3 && (
+        {/* Only the Documents step (4) is optional — the voice statement (3) is
+            mandatory server-side, so Skip must never bypass it. */}
+        {step === 4 && (
           <Btn variant="ghost" onClick={goNext} style={{ flex: 1, color: '#64748B' }}>Skip</Btn>
         )}
         <Btn

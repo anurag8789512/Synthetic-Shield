@@ -28,6 +28,10 @@ const STATUS_CONFIG = {
   closed:   { label: 'Closed',            bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
   pending:  { label: 'Pending',           bg: '#FFFBEB', color: '#D97706', border: '#FDE68A' },
   processing: { label: 'Processing',      bg: '#EFF6FF', color: '#2563EB', border: '#BFDBFE' },
+  rejected: { label: 'Rejected',          bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
+  moderator_approved: { label: 'Approved (Moderator)', bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
+  confirmed_fraud: { label: 'Fraud Confirmed', bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
+  cleared:  { label: 'Cleared (SIU)',     bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
 } as const
 
 type StatusKey = keyof typeof STATUS_CONFIG

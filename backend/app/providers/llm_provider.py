@@ -3,6 +3,7 @@ LLM provider for the Copilot Agent — provider-swappable via COPILOT_LLM_PROVID
 Implements Mistral (OpenAI-compatible chat completions) and Google Gemini
 (native REST), both with function/tool-calling. No SDK dependency; httpx only.
 """
+import base64
 import json
 
 import httpx
@@ -25,15 +26,20 @@ def llm_available() -> bool:
     return False
 
 
-def _to_gemini_contents(messages: list[dict]) -> list[dict]:
+def _to_gemini_contents(messages: list[dict], images: list[tuple[str, bytes]] | None = None) -> list[dict]:
     """Convert generic chat messages to Gemini `contents` format.
 
     Supported message shapes:
       {"role": "user"|"assistant", "content": str}
       {"role": "assistant", "tool_call": {"name": str, "args": dict}}
       {"role": "tool", "name": str, "result": dict}
+
+    If `images` is given, they're attached as inline data parts on the last
+    user message (Gemini expects image bytes alongside the question, not as
+    a separate turn).
     """
     contents = []
+    last_user_idx = None
     for m in messages:
         if m["role"] == "tool":
             contents.append({
@@ -48,6 +54,14 @@ def _to_gemini_contents(messages: list[dict]) -> list[dict]:
         else:
             role = "model" if m["role"] == "assistant" else "user"
             contents.append({"role": role, "parts": [{"text": m["content"]}]})
+            if role == "user":
+                last_user_idx = len(contents) - 1
+
+    if images and last_user_idx is not None:
+        for mime_type, content in images:
+            contents[last_user_idx]["parts"].append({
+                "inlineData": {"mimeType": mime_type, "data": base64.b64encode(content).decode()}
+            })
     return contents
 
 
@@ -56,28 +70,35 @@ async def chat(
     system: str = "",
     tools: list[dict] | None = None,
     temperature: float = 0.2,
+    images: list[tuple[str, bytes]] | None = None,
 ) -> dict:
     """Run one LLM turn. Returns {"content": str|None, "tool_call": {"name", "args"}|None}.
 
     `tools` is a list of function declarations:
       {"name": ..., "description": ..., "parameters": {JSON schema}}
+    `images` is an optional list of (mime_type, raw_bytes) attached to the
+    last user message — requires a vision-capable model on the configured
+    provider.
     """
     if not llm_available():
         raise LLMUnavailable("No LLM provider configured (set MISTRAL_API_KEY or GEMINI_API_KEY).")
 
     if settings.COPILOT_LLM_PROVIDER == "mistral":
-        return await _chat_mistral(messages, system, tools, temperature)
-    return await _chat_gemini(messages, system, tools, temperature)
+        return await _chat_mistral(messages, system, tools, temperature, images)
+    return await _chat_gemini(messages, system, tools, temperature, images)
 
 
 # ── Mistral (OpenAI-compatible) ─────────────────────────────────────────
 _TOOL_CALL_ID = "copilot001"  # Mistral requires a 9+ char alphanumeric id per call
 
 
-def _to_mistral_messages(messages: list[dict], system: str) -> list[dict]:
+def _to_mistral_messages(
+    messages: list[dict], system: str, images: list[tuple[str, bytes]] | None = None
+) -> list[dict]:
     out: list[dict] = []
     if system:
         out.append({"role": "system", "content": system})
+    last_user_idx = None
     for m in messages:
         if m["role"] == "tool":
             out.append({
@@ -101,13 +122,30 @@ def _to_mistral_messages(messages: list[dict], system: str) -> list[dict]:
             })
         else:
             out.append({"role": m["role"], "content": m["content"]})
+            if m["role"] == "user":
+                last_user_idx = len(out) - 1
+
+    if images and last_user_idx is not None:
+        parts = [{"type": "text", "text": out[last_user_idx]["content"]}]
+        for mime_type, content in images:
+            parts.append({
+                "type": "image_url",
+                "image_url": f"data:{mime_type};base64,{base64.b64encode(content).decode()}",
+            })
+        out[last_user_idx]["content"] = parts
     return out
 
 
-async def _chat_mistral(messages: list[dict], system: str, tools: list[dict] | None, temperature: float) -> dict:
+async def _chat_mistral(
+    messages: list[dict],
+    system: str,
+    tools: list[dict] | None,
+    temperature: float,
+    images: list[tuple[str, bytes]] | None = None,
+) -> dict:
     body: dict = {
         "model": settings.MISTRAL_MODEL,
-        "messages": _to_mistral_messages(messages, system),
+        "messages": _to_mistral_messages(messages, system, images),
         "temperature": temperature,
     }
     if tools:
@@ -147,9 +185,15 @@ async def _chat_mistral(messages: list[dict], system: str, tools: list[dict] | N
 
 
 # ── Gemini (native REST) ─────────────────────────────────────────────────
-async def _chat_gemini(messages: list[dict], system: str, tools: list[dict] | None, temperature: float) -> dict:
+async def _chat_gemini(
+    messages: list[dict],
+    system: str,
+    tools: list[dict] | None,
+    temperature: float,
+    images: list[tuple[str, bytes]] | None = None,
+) -> dict:
     body: dict = {
-        "contents": _to_gemini_contents(messages),
+        "contents": _to_gemini_contents(messages, images),
         "generationConfig": {"temperature": temperature},
     }
     if system:

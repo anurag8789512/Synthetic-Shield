@@ -42,6 +42,13 @@ def get_claim_evidence_summary(claim_id: int, db: DBSession) -> dict:
         except json.JSONDecodeError:
             report = {"raw": claim.artifact_report}
 
+    valuation = {}
+    if claim.valuation_report:
+        try:
+            valuation = json.loads(claim.valuation_report)
+        except json.JSONDecodeError:
+            valuation = {"raw": claim.valuation_report}
+
     return {
         "claim_number": claim.claim_number,
         "status": claim.status,
@@ -50,12 +57,77 @@ def get_claim_evidence_summary(claim_id: int, db: DBSession) -> dict:
         "accident_description": claim.accident_description,
         "fraud_confidence_score": claim.fraud_confidence_score,
         "narrative_similarity_score": claim.narrative_similarity_score,
+        "claim_amount_cents": claim.claim_amount_cents,
         "payout_amount_cents": claim.payout_amount_cents,
         "payout_transaction_id": claim.payout_transaction_id,
+        "automated_valuation": valuation or None,
         "per_modality_analysis": modality_findings,
         "artifact_report_summary": report.get("summary"),
         "artifact_report_recommendation": report.get("recommendation"),
         "detected_artifacts": report.get("detected_artifacts", []),
+    }
+
+
+def get_fraud_score_breakdown(claim_id: int, db: DBSession) -> dict:
+    """Per-level division of the fusion fraud score (Level 1 metadata, Level 2 AI
+    manipulation, Level 3 consistency). Stored data only; no external calls."""
+    from app.scoring.persistence import ClaimScore
+
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        return {"error": "Claim not found."}
+
+    row = (
+        db.query(ClaimScore)
+        .filter(ClaimScore.claim_id == str(claim.claim_number))
+        .order_by(ClaimScore.version.desc())
+        .first()
+    )
+    if not row:
+        return {"error": "No fusion score breakdown is recorded for this claim "
+                         "(it may have been scored before the fusion engine was introduced)."}
+
+    try:
+        breakdown = json.loads(row.breakdown_json)
+    except json.JSONDecodeError:
+        return {"error": "Stored score breakdown could not be parsed."}
+
+    LEVELS = {
+        "metadata": "level_1_metadata_analysis",
+        "image": "level_2_ai_manipulation",
+        "video": "level_2_ai_manipulation",
+        "audio": "level_2_ai_manipulation",
+        "text": "level_2_ai_manipulation",
+        "consistency": "level_3_consistency_check",
+    }
+    levels: dict = {"level_1_metadata_analysis": [], "level_2_ai_manipulation": [],
+                    "level_3_consistency_check": []}
+    weights = breakdown.get("weights_used", {})
+    for sub in breakdown.get("subscores", []):
+        name = sub.get("name")
+        levels[LEVELS.get(name, "level_2_ai_manipulation")].append({
+            "signal": name,
+            "score": sub.get("value"),
+            "status": sub.get("status"),
+            "weight_used": weights.get(name),
+            "provider": sub.get("provider"),
+            "component_scores": sub.get("components") or None,
+            "findings": [f.get("human_readable") for f in sub.get("findings", [])],
+        })
+
+    return {
+        "claim_number": claim.claim_number,
+        "score_version": row.version,
+        "config_version": row.config_version,
+        "levels": levels,
+        "base_score": breakdown.get("base_score"),
+        "final_score": breakdown.get("final_score"),
+        "escalated": breakdown.get("escalated"),
+        "escalation_source": breakdown.get("escalation_source"),
+        "routing_band": breakdown.get("routing_band"),
+        "forced_review_reason": breakdown.get("forced_review_reason"),
+        "note": "Scores are 0-100, higher = more fraud-suspicious. Final score is the "
+                "weighted fusion of available signals with worst-signal escalation.",
     }
 
 
@@ -124,6 +196,19 @@ TOOL_DECLARATIONS = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "get_fraud_score_breakdown",
+        "description": (
+            "Return the division of this claim's fraud score across the three analysis levels: "
+            "Level 1 metadata analysis, Level 2 AI-manipulation analysis (image/video/audio/text), "
+            "and Level 3 consistency check — with each signal's score, weight, status, component "
+            "scores, and findings, plus the base score, final fused score, escalation info, and "
+            "routing band. Use this whenever the officer asks how the fraud score was computed, "
+            "what each level/check scored, or why the claim was routed the way it was. Works for "
+            "every claim regardless of outcome. Stored data only — fast."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
         "name": "search_repair_cost_estimate",
         "description": "Search the web for real-world repair/replacement cost estimates for a damaged vehicle part. Returns an estimated cost range with source snippets and a confidence level.",
         "parameters": {
@@ -134,5 +219,17 @@ TOOL_DECLARATIONS = [
             },
             "required": ["part_name", "vehicle_description"],
         },
+    },
+    {
+        "name": "run_image_forensics_reanalysis",
+        "description": (
+            "Run a fresh, deeper multi-specialist vision-LLM investigation of this claim's evidence photo: "
+            "AI image manipulation, damage/narrative consistency, real EXIF metadata, a real repair-cost web "
+            "search, and real claim-history pattern checks. Much slower than get_claim_evidence_summary — "
+            "use it only when the officer explicitly asks for a fresh/deeper look, a second opinion, or "
+            "specifically about EXIF/metadata that get_claim_evidence_summary doesn't cover. This is "
+            "informational only: it never changes the claim's official fraud score or status."
+        ),
+        "parameters": {"type": "object", "properties": {}},
     },
 ]

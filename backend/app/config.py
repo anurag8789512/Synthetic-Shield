@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     MISTRAL_MODEL: str = "mistral-small-latest"
     SERPAPI_API_KEY: str = ""
 
+    # Fraud Fusion Scoring — provider selection (spec §9)
+    AUDIO_DETECTOR_PROVIDER: str = "resemble"   # resemble | mock
+    TEXT_DETECTOR_PRIMARY: str = "gptzero"      # gptzero | mock
+    TEXT_DETECTOR_SECONDARY: str = "pangram"    # pangram | mock | none
+    REVERSE_SEARCH_PROVIDER: str = "serpapi"    # serpapi | mock
+    PART_PRICING_PROVIDER: str = "serpapi"      # serpapi | mock
+    WEATHER_PROVIDER: str = "openweather"       # openweather | mock
+    STT_PROVIDER: str = "faster_whisper"        # faster_whisper | mock | none
+    SCORING_DEMO_MODE: int = 0                  # 1 = force all mock providers
+    GPTZERO_API_KEY: str = ""
+    PANGRAM_API_KEY: str = ""
+    OPENWEATHER_API_KEY: str = ""
+
     # Adjudication thresholds
     AUTO_APPROVE_BELOW: int = 15
     SIU_FLAG_ABOVE: int = 85

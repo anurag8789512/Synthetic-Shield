@@ -6,6 +6,7 @@ from unittest.mock import patch, AsyncMock
 import pytest
 
 from app.models import OTPCode, Session, User, ClaimsOfficer
+from app.security import hash_password
 import hashlib
 
 
@@ -145,7 +146,7 @@ def test_dashboard_login_returns_401_for_wrong_password(client, db):
     officer = ClaimsOfficer(
         name="Test Officer",
         email="login_test@test.com",
-        password_hash="correctpass",
+        password_hash=hash_password("correctpass"),
         role="moderator",
     )
     db.add(officer)
@@ -161,7 +162,7 @@ def test_dashboard_login_returns_token_on_correct_credentials(client, db):
     officer = ClaimsOfficer(
         name="Test Officer",
         email="valid_officer@test.com",
-        password_hash="correctpass",
+        password_hash=hash_password("correctpass"),
         role="moderator",
     )
     db.add(officer)

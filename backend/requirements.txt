@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+bcrypt
 sqlalchemy
 pydantic
 pydantic-settings
@@ -11,3 +12,10 @@ pillow
 truststore
 pytest
 pytest-asyncio
+opencv-python-headless
+exifread
+piexif
+pypdf
+imagehash
+pyyaml
+faster-whisper

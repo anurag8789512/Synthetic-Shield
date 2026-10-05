@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from app.database import get_db
-from app.models import CopilotMessage
+from app.models import CopilotMessage, ClaimsOfficer
+from app.auth_deps import get_current_officer
 from app.agents.copilot_agent import copilot_respond
 from app.agents.audit_logger import log_event
 
@@ -14,20 +15,28 @@ router = APIRouter(prefix="/claims", tags=["copilot"])
 
 
 class ChatRequest(BaseModel):
-    officer_id: int
     message: str
 
 
 @router.post("/{claim_id}/copilot-chat")
-async def copilot_chat(claim_id: int, body: ChatRequest, db: DBSession = Depends(get_db)):
-    response = await copilot_respond(claim_id, body.officer_id, body.message, db)
-    log_event(db, claim_id, "officer", "copilot_query", actor_id=str(body.officer_id),
+async def copilot_chat(
+    claim_id: int,
+    body: ChatRequest,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
+    response = await copilot_respond(claim_id, current_officer.id, body.message, db)
+    log_event(db, claim_id, "officer", "copilot_query", actor_id=str(current_officer.id),
               details={"question": body.message[:100], "response_length": len(response)})
     return {"claim_id": claim_id, "role": "assistant", "content": response, "response": response}
 
 
 @router.get("/{claim_id}/copilot-history")
-def copilot_history(claim_id: int, db: DBSession = Depends(get_db)):
+def copilot_history(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     messages = db.query(CopilotMessage).filter(
         CopilotMessage.claim_id == claim_id,
     ).order_by(CopilotMessage.created_at.asc()).all()

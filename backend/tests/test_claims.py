@@ -20,6 +20,7 @@ def _multipart_claim(coverage_id: int, **overrides) -> dict:
         "coverage_id": str(coverage_id),
         "accident_location": "Test Street",
         "accident_description": "Car was rear-ended.",
+        "claim_amount": "500",
     }
     defaults.update(overrides)
     return defaults
@@ -118,16 +119,60 @@ def test_submit_claim_accepts_both_video_and_image(client, db, test_user, user_s
 
 # ── GET /claims/queue/all ─────────────────────────────────────────────────────
 
-def test_get_claims_queue_returns_list(client, test_claim):
+def test_get_claims_queue_requires_officer_auth(client, test_claim):
     resp = client.get("/claims/queue/all")
+    assert resp.status_code == 401
+
+
+def test_get_claims_queue_returns_list(client, test_claim, officer_token):
+    resp = client.get("/claims/queue/all", headers=_auth_headers(officer_token))
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
-def test_get_claims_queue_includes_test_claim(client, test_claim):
-    resp = client.get("/claims/queue/all")
+def test_get_claims_queue_includes_test_claim(client, test_claim, officer_token):
+    resp = client.get("/claims/queue/all", headers=_auth_headers(officer_token))
     claim_numbers = [c["claim_number"] for c in resp.json()]
     assert test_claim.claim_number in claim_numbers
+
+
+# ── POST /claims/{id}/review-done ─────────────────────────────────────────────
+
+def test_review_done_requires_officer_auth(client, test_claim):
+    resp = client.post(f"/claims/{test_claim.id}/review-done")
+    assert resp.status_code == 401
+
+
+def test_review_done_rejects_non_auto_approved_claim(client, test_claim, officer_token):
+    resp = client.post(f"/claims/{test_claim.id}/review-done", headers=_auth_headers(officer_token))
+    assert resp.status_code == 400
+
+
+def test_review_done_moves_claim_from_queue_to_case_files(client, test_claim, officer_token, db):
+    test_claim.status = "auto_approved"
+    db.commit()
+
+    # before: pinned in the queue as review-only, attributed to the system
+    before = next(c for c in client.get("/claims/queue/all", headers=_auth_headers(officer_token)).json()
+                  if c["id"] == test_claim.id)
+    assert before["in_queue"] is True and before["queue_action"] == "review_only"
+
+    resp = client.post(f"/claims/{test_claim.id}/review-done", headers=_auth_headers(officer_token))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "review_done"
+
+    # after: out of the queue, still a system-decided case file
+    after = next(c for c in client.get("/claims/queue/all", headers=_auth_headers(officer_token)).json()
+                 if c["id"] == test_claim.id)
+    assert after["in_queue"] is False
+    assert after["in_case_files"] is True
+    assert after["decided_by"] == "system"       # NOT reattributed to a moderator
+    assert after["moderator_decision"] is None
+    assert after["queue_action"] is None
+
+    # acknowledging twice is rejected
+    again = client.post(f"/claims/{test_claim.id}/review-done", headers=_auth_headers(officer_token))
+    assert again.status_code == 400
 
 
 # ── GET /claims/{id} — requires user auth ─────────────────────────────────────
@@ -145,12 +190,21 @@ def test_get_claim_returns_404_for_missing(client, user_session):
 
 # ── POST /claims/{id}/copilot-chat ────────────────────────────────────────────
 
-def test_copilot_chat_returns_response(client, test_claim):
+def test_copilot_chat_requires_officer_auth(client, test_claim):
+    resp = client.post(
+        f"/claims/{test_claim.id}/copilot-chat",
+        json={"message": "Why was this flagged?"},
+    )
+    assert resp.status_code == 401
+
+
+def test_copilot_chat_returns_response(client, test_claim, officer_token):
     with patch("app.routers.copilot.copilot_respond", new_callable=AsyncMock,
                return_value="The fraud score is 72%."):
         resp = client.post(
             f"/claims/{test_claim.id}/copilot-chat",
-            json={"officer_id": 1, "message": "Why was this flagged?"},
+            json={"message": "Why was this flagged?"},
+            headers=_auth_headers(officer_token),
         )
     assert resp.status_code == 200
     body = resp.json()
@@ -158,26 +212,27 @@ def test_copilot_chat_returns_response(client, test_claim):
     assert "content" in body or "response" in body
 
 
-def test_copilot_chat_returns_200_for_missing_claim(client, user_session):
+def test_copilot_chat_returns_200_for_missing_claim(client, user_session, officer_token):
     """Copilot endpoint does not validate claim existence — returns 200 with a response."""
     with patch("app.routers.copilot.copilot_respond", new_callable=AsyncMock,
                return_value="I cannot find that claim."):
         resp = client.post(
             "/claims/99999/copilot-chat",
-            json={"officer_id": 1, "message": "Hello"},
+            json={"message": "Hello"},
+            headers=_auth_headers(officer_token),
         )
     assert resp.status_code == 200
 
 
 # ── GET /claims/{id}/copilot-history ─────────────────────────────────────────
 
-def test_copilot_history_returns_empty_list_for_new_claim(client, test_claim):
-    resp = client.get(f"/claims/{test_claim.id}/copilot-history")
+def test_copilot_history_returns_empty_list_for_new_claim(client, test_claim, officer_token):
+    resp = client.get(f"/claims/{test_claim.id}/copilot-history", headers=_auth_headers(officer_token))
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-def test_copilot_history_returns_messages_after_chat(client, db, test_claim):
+def test_copilot_history_returns_messages_after_chat(client, db, test_claim, officer_token):
     msg = CopilotMessage(
         claim_id=test_claim.id,
         officer_id=1,
@@ -187,7 +242,7 @@ def test_copilot_history_returns_messages_after_chat(client, db, test_claim):
     db.add(msg)
     db.commit()
 
-    resp = client.get(f"/claims/{test_claim.id}/copilot-history")
+    resp = client.get(f"/claims/{test_claim.id}/copilot-history", headers=_auth_headers(officer_token))
     assert resp.status_code == 200
     messages = resp.json()
     assert len(messages) == 1

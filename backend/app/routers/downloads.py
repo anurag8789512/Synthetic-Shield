@@ -7,7 +7,8 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.database import get_db
-from app.models import Claim, User, Policy, Coverage, ClaimMediaAnalysis, AuditTrail
+from app.models import Claim, User, Policy, Coverage, ClaimMediaAnalysis, AuditTrail, ClaimsOfficer
+from app.auth_deps import get_current_officer
 from app.report_generators import generate_report_pdf, generate_case_file_pdf, generate_forensic_audit_pdf
 
 router = APIRouter(prefix="/downloads", tags=["downloads"])
@@ -44,7 +45,11 @@ def download_case_file(
 
 
 @router.get("/forensic-audit/{claim_id}")
-def download_forensic_audit(claim_id: int, db: DBSession = Depends(get_db)):
+def download_forensic_audit(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Download the full forensic audit report for a claim."""
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     if not claim:
@@ -80,7 +85,23 @@ def download_forensic_audit(claim_id: int, db: DBSession = Depends(get_db)):
         for t in trail
     ]
 
-    pdf = generate_forensic_audit_pdf(claim_data, policy_data, user_data, analyses_data, trail_data)
+    # Latest fusion score breakdown (per-level division), if recorded
+    import json as _json
+    from app.scoring.persistence import ClaimScore
+    score_breakdown = None
+    score_row = (
+        db.query(ClaimScore)
+        .filter(ClaimScore.claim_id == str(claim.claim_number))
+        .order_by(ClaimScore.version.desc())
+        .first()
+    )
+    if score_row:
+        try:
+            score_breakdown = _json.loads(score_row.breakdown_json)
+        except _json.JSONDecodeError:
+            score_breakdown = None
+
+    pdf = generate_forensic_audit_pdf(claim_data, policy_data, user_data, analyses_data, trail_data, score_breakdown)
     filename = f"SyntheticShield_ForensicAudit_{claim.claim_number}.pdf"
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})

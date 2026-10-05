@@ -58,11 +58,10 @@ class Session(Base):
     __tablename__ = "sessions"
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    user_id = Column(Integer, index=True)  # holds a users.id or claims_officers.id depending on owner_type
+    owner_type = Column(String, nullable=False, default="user")  # "user" | "officer"
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-
-    user = relationship("User")
 
 
 class Claim(Base):
@@ -83,6 +82,8 @@ class Claim(Base):
     consistency_score = Column(Float, nullable=True)
     narrative_similarity_score = Column(Float, nullable=True)
     artifact_report = Column(Text, nullable=True)
+    claim_amount_cents = Column(Integer, nullable=True)
+    valuation_report = Column(Text, nullable=True)
     payout_transaction_id = Column(String, nullable=True)
     payout_amount_cents = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

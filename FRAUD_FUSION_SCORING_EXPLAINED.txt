@@ -1,0 +1,196 @@
+================================================================================
+ SYNTHETICSHIELD — FRAUD FUSION SCORING: HOW A CLAIM GETS ITS SCORE
+ (config version 0.1.0-design · thresholds and weights from scoring_config.yaml)
+================================================================================
+
+THE BIG PICTURE
+---------------
+Every claim is analyzed by SIX independent signals, each scored 0-100 where
+HIGHER = MORE FRAUD-SUSPICIOUS:
+
+  Level 1 — Metadata Analysis
+    1. metadata     (weight 0.10)  EXIF/container/PDF rule checks, duplicate-
+                                   evidence hashes, timestamp & GPS contradictions
+  Level 2 — AI Manipulation Analysis
+    2. image        (weight 0.22)  in-house pixel forensics (ELA, JPEG double-
+                                   quantization, noise consistency, GAN frequency)
+    3. video        (weight 0.22)  per-frame pixel battery + temporal checks
+                                   (noise discontinuity, optical-flow jumps)
+    4. audio        (weight 0.18)  voice deepfake detector (Resemble AI)
+    5. text         (weight 0.08)  AI-written-text detectors (GPTZero + Pangram,
+                                   cross-checked)
+  Level 3 — Consistency Check
+    6. consistency  (weight 0.20)  cross-evidence rules: narrative contradictions,
+                                   weather records, reverse image search,
+                                   per-part price verification
+
+The engine is fully deterministic — no AI language model is involved in
+computing the score. Same inputs always produce the same score.
+
+STEP 1 — WEIGHTED BASE SCORE
+----------------------------
+  Base = 0.10·metadata + 0.22·image + 0.22·video + 0.18·audio
+       + 0.08·text + 0.20·consistency
+
+If a signal is unavailable (vendor outage) or not applicable (e.g. no video
+submitted, statement too short), it is dropped and the remaining weights are
+re-normalized to sum to 1.0 — a missing signal can never silently push a
+claim toward approval.
+
+STEP 2 — WORST-SIGNAL ESCALATION
+--------------------------------
+One near-certain fake must never be averaged away. If any LEVEL 2
+AI-MANIPULATION signal (image, video, audio, text — only these can escalate)
+reaches 90 or more:
+
+  Final = max(Base, worst_signal − 5)
+
+Exception by design: an external reverse-image-search hit (claim photo found
+on the public web, rule C-H3) also escalates, as a virtual signal of at
+least 92, even though it lives in the consistency check.
+
+Metadata and consistency rule-point totals alone can NEVER trigger
+escalation — they only contribute through their weights.
+
+STEP 3 — ROUTING (the engine routes, it NEVER denies)
+-----------------------------------------------------
+  Final  <  15   → AUTO_APPROVE        (genuine — instant payout)
+  15 ≤ Final ≤ 85 → HUMAN_REVIEW       (moderator decides)
+  Final  >  85   → SIU_INVESTIGATION   (5-officer quorum vote)
+
+Safety overrides (can only UPGRADE auto-approve to human review, never
+downgrade): image/video analysis failed on media that was actually
+submitted, or 3+ of the 6 signals unavailable.
+
+Every score is stored append-only with its full decomposition — each
+sub-score, each triggered rule, the weights used, and whether escalation
+fired. Re-scoring creates a new version; history is never overwritten.
+
+================================================================================
+ CASE 1 — GENUINE CLAIM → AUTO_APPROVE
+================================================================================
+A real customer rear-ended at a light. Phone photos with intact camera EXIF,
+a natural voice note, a hand-written description.
+
+  Signal        Score   Why so low
+  ---------     -----   ----------------------------------------------------
+  metadata        6     intact camera EXIF consistent with claim (earned the
+                        -8 credit against a minor +8 stripped-EXIF flag on
+                        one WhatsApp-forwarded photo)
+  image           4     normal JPEG compression, consistent sensor noise,
+                        no double-quantization periodicity
+  video           5     stable noise profile across frames, plausible motion
+  audio           3     natural human voice, no synthesis markers
+  text            4     human-written statement (detectors agree)
+  consistency     7     voice, written statement and photos all describe
+                        rear damage; claimed cost at market rate
+
+  Base  = 0.10·6 + 0.22·4 + 0.22·5 + 0.18·3 + 0.08·4 + 0.20·7
+        = 0.60 + 0.88 + 1.10 + 0.54 + 0.32 + 1.40  =  4.84
+  Escalation: highest AI signal is 5 → far below 90 → does not fire.
+  FINAL = 4.84  →  < 15  →  AUTO_APPROVE
+
+What happens next: the valuation agent checks the claimed amount against a
+live market estimate for the damaged part, caps the payout if inflated, the
+payout is initiated automatically, and the customer is notified. Officers
+still see the claim (read-only) with its full score division.
+
+Worth noting: a photo with stripped EXIF alone (metadata = 8) contributes
+only 0.10 × 8 = 0.8 points — deliberately weak, because WhatsApp/Instagram
+strip EXIF benignly. It can never block an otherwise clean claim.
+
+================================================================================
+ CASE 2 — SUSPICIOUS-BUT-INCONCLUSIVE → HUMAN_REVIEW (moderator)
+================================================================================
+A claim where the photo was edited (maybe innocently — brightness, crop,
+or maybe not), but nothing screams "fake".
+
+  Signal        Score   Why medium
+  ---------     -----   ----------------------------------------------------
+  metadata       45     Photoshop software tag on a photo submitted as an
+                        original capture (+35), modified 3h after capture
+                        with an editor tag present (+20 would stack — here
+                        total clamped from triggered rules ≈ 45)
+  image          60     localized error-level hotspot + noise variance
+                        inconsistency in one region — editing indicators,
+                        but below the "near-certain" range
+  video          15     clean
+  audio          12     natural voice
+  text           20     mostly human-written, mild anomalies
+  consistency    25     claimed part cost ~2× market median (+15), one minor
+                        discrepancy between voice and written statement (+10)
+
+  Base  = 0.10·45 + 0.22·60 + 0.22·15 + 0.18·12 + 0.08·20 + 0.20·25
+        = 4.50 + 13.20 + 3.30 + 2.16 + 1.60 + 5.00  =  29.76
+  Escalation: highest AI signal is image at 60 → below 90 → does not fire.
+  FINAL = 29.76  →  between 15 and 85  →  HUMAN_REVIEW
+
+What happens next: the least-loaded moderator is assigned. The dashboard
+shows the per-level score division (so the moderator sees it was the image
+signal and the price inflation driving the score), the specific findings
+("Photo IMG_2201.jpg carries an Adobe Photoshop software tag…"), and the
+copilot can explain any number on demand. The moderator approves (payout)
+or rejects (with reason) — the engine itself never denies.
+
+================================================================================
+ CASE 3 — AI-FABRICATED EVIDENCE → SIU_INVESTIGATION
+================================================================================
+Fraud attempt: AI-generated damage photos, cloned voice note, a story that
+doesn't hold together.
+
+  Signal        Score   Why high
+  ---------     -----   ----------------------------------------------------
+  metadata       85     no camera make/model on an "in-app capture" (+20),
+                        editing trace (+35), capture timestamp after the
+                        claim was submitted (+35) → clamped at 85 triggered
+  image          96     strong JPEG double-quantization periodicity, flat
+                        high-frequency spectrum typical of diffusion output,
+                        noise inconsistency across regions
+  video          20     (dashcam clip itself genuine)
+  audio          30     some synthetic markers, inconclusive alone
+  text           55     statement likely AI-polished (detectors disagree,
+                        averaged, disagreement noted as a finding)
+  consistency    88     voice says front collision, photos show rear damage
+                        (+45, hard contradiction); claimed hail timing
+                        contradicted by weather records (+45) → clamped 88
+
+  Base  = 0.10·85 + 0.22·96 + 0.22·20 + 0.18·30 + 0.08·55 + 0.20·88
+        = 8.50 + 21.12 + 4.40 + 5.40 + 4.40 + 17.60  =  61.42
+
+  On averaging alone this would land in HUMAN_REVIEW — that is exactly the
+  trap worst-signal escalation exists for:
+
+  Escalation: image = 96 ≥ 90  →  Final = max(61.42, 96 − 5) = 91
+  FINAL = 91  →  > 85  →  SIU_INVESTIGATION  (escalation_source = image)
+
+What happens next: 5 least-loaded SIU officers are assigned. Confirming
+fraud requires a UNANIMOUS quorum; a single "clear" vote clears the claim
+and pays it out. The SIU panel sees the full division — including the fact
+that one near-certain signal (image 96) drove the routing, not the average.
+
+--------------------------------------------------------------------------------
+ VARIANT — THE STOLEN-PHOTO CASE (escalation from Level 3)
+--------------------------------------------------------------------------------
+Everything looks mild (Base ≈ 25, consistency = 60) but the reverse image
+search finds the "damage photo" on a used-car marketplace listing from last
+year (rule C-H3, +50, escalation-eligible):
+
+  Virtual signal = max(60, 92) = 92 ≥ 90
+  Final = max(Base, 92 − 5) = 87  →  > 85  →  SIU_INVESTIGATION
+
+A web-published photo is treated as near-certain misuse of evidence even
+when every other signal is quiet.
+
+================================================================================
+ QUICK REFERENCE
+================================================================================
+  Weights        image .22 · video .22 · consistency .20 · audio .18 ·
+                 metadata .10 · text .08   (sum = 1.0, re-normalized if
+                 signals are missing)
+  Escalation     any L2 signal ≥ 90 → Final = max(Base, signal − 5);
+                 C-H3 web match acts as a 92 virtual signal
+  Routing        < 15 auto-approve · 15–85 moderator · > 85 SIU
+  Invariants     deterministic · decomposable · append-only · never denies
+  Calibration    all numbers are design-stage values in scoring_config.yaml,
+                 pending calibration on labeled historical claims
+================================================================================

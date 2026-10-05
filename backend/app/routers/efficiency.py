@@ -3,12 +3,17 @@ Efficiency endpoints: officer workload and performance metrics.
 Combines moderator review + SIU vote data for holistic workload balancing.
 Also includes notification retry and audit trail endpoints.
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
 
 from app.database import get_db
 from app.models import ClaimsOfficer, ClaimAssignment, ModeratorAction, SIUOfficerVote, Claim, NotificationLog, AuditTrail
+from app.auth_deps import get_current_officer
+from app.agents.audit_logger import log_event
 
 router = APIRouter(prefix="/efficiency", tags=["efficiency"])
 
@@ -65,13 +70,19 @@ def _officer_stats(o: ClaimsOfficer, db: DBSession) -> dict:
 
 
 @router.get("/officers")
-def get_all_officers(db: DBSession = Depends(get_db)):
+def get_all_officers(
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     officers = db.query(ClaimsOfficer).all()
     return [_officer_stats(o, db) for o in officers]
 
 
 @router.get("/workload-summary")
-def get_workload_summary(db: DBSession = Depends(get_db)):
+def get_workload_summary(
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     officers = db.query(ClaimsOfficer).all()
     stats = [_officer_stats(o, db) for o in officers]
 
@@ -97,7 +108,11 @@ def get_workload_summary(db: DBSession = Depends(get_db)):
 
 
 @router.get("/officer/{officer_id}/assignments")
-def get_officer_assignments(officer_id: int, db: DBSession = Depends(get_db)):
+def get_officer_assignments(
+    officer_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     officer = db.query(ClaimsOfficer).filter(ClaimsOfficer.id == officer_id).first()
     if not officer:
         raise HTTPException(status_code=404, detail="Officer not found.")
@@ -127,8 +142,68 @@ def get_officer_assignments(officer_id: int, db: DBSession = Depends(get_db)):
     }
 
 
+class ReassignBody(BaseModel):
+    new_officer_id: int
+
+
+@router.post("/assignments/{assignment_id}/reassign")
+def reassign_assignment(
+    assignment_id: int,
+    body: ReassignBody,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
+    """Move a pending assignment to another officer. Senior/Lead only."""
+    if current_officer.role != "senior":
+        raise HTTPException(status_code=403, detail="Only Senior/Lead officers can reassign claims.")
+
+    assignment = db.query(ClaimAssignment).filter(ClaimAssignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found.")
+    if assignment.status != "pending":
+        raise HTTPException(status_code=400, detail="Only pending assignments can be reassigned.")
+
+    target = db.query(ClaimsOfficer).filter(ClaimsOfficer.id == body.new_officer_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target officer not found.")
+    if target.id == assignment.officer_id:
+        raise HTTPException(status_code=400, detail="Assignment already belongs to that officer.")
+    # Keep SIU quorum panels valid — roles must match siu.py::_SIU_ELIGIBLE_ROLES.
+    if assignment.assignment_type == "siu_vote" and target.role not in ("siu_officer", "senior"):
+        raise HTTPException(status_code=400, detail="SIU vote assignments can only go to SIU-eligible officers.")
+
+    duplicate = db.query(ClaimAssignment).filter(
+        ClaimAssignment.claim_id == assignment.claim_id,
+        ClaimAssignment.officer_id == target.id,
+        ClaimAssignment.assignment_type == assignment.assignment_type,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"{target.name} already has this claim assigned.")
+
+    previous = db.query(ClaimsOfficer).filter(ClaimsOfficer.id == assignment.officer_id).first()
+    assignment.officer_id = target.id
+    assignment.assigned_at = datetime.now(timezone.utc)
+    db.commit()
+
+    log_event(
+        db, assignment.claim_id, "officer", "assignment_reassigned",
+        actor_id=str(current_officer.id),
+        details={
+            "assignment_id": assignment.id,
+            "assignment_type": assignment.assignment_type,
+            "from_officer": previous.name if previous else None,
+            "to_officer": target.name,
+        },
+    )
+
+    return {"status": "reassigned", "assignment_id": assignment.id, "new_officer": target.name}
+
+
 @router.post("/retry-notifications")
-async def retry_notifications(db: DBSession = Depends(get_db)):
+async def retry_notifications(
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Retry all failed notifications."""
     from app.agents.notification_agent import retry_failed_notifications
     result = await retry_failed_notifications(db)
@@ -136,7 +211,10 @@ async def retry_notifications(db: DBSession = Depends(get_db)):
 
 
 @router.get("/failed-notifications")
-def get_failed_notifications(db: DBSession = Depends(get_db)):
+def get_failed_notifications(
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """List all failed notification attempts."""
     failed = db.query(NotificationLog).filter(
         NotificationLog.status.in_(["failed", "retry_failed"])
@@ -157,7 +235,11 @@ def get_failed_notifications(db: DBSession = Depends(get_db)):
 
 
 @router.get("/audit-log")
-def get_full_audit_log(limit: int = 100, db: DBSession = Depends(get_db)):
+def get_full_audit_log(
+    limit: int = 100,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Get the most recent audit trail entries across all claims."""
     entries = db.query(AuditTrail).order_by(AuditTrail.created_at.desc()).limit(limit).all()
     return [

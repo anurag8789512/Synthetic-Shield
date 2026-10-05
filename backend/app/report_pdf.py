@@ -138,7 +138,7 @@ def generate_report_pdf(
     modality_reports = report.get("modality_reports", [])
     for mr in modality_reports:
         modality = mr.get("modality", "unknown").capitalize()
-        raw_score = mr.get("raw_score", 0)
+        raw_score = mr.get("raw_score") or 0
         severity = mr.get("severity", "low")
         verdict = _verdict_label(mr.get("verdict", "unknown"))
         explanation = mr.get("explanation", "No data.")

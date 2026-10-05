@@ -7,11 +7,67 @@ from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
 
 from app.database import get_db, SessionLocal
-from app.models import User, Claim, Coverage, Policy, ClaimDocument, ClaimMediaAnalysis, AuditTrail
-from app.auth_deps import get_current_user
+from app.models import (
+    User, Claim, Coverage, Policy, ClaimDocument, ClaimMediaAnalysis, AuditTrail,
+    ClaimsOfficer, ModeratorAction,
+)
+from app.auth_deps import get_current_user, get_current_officer
 from app.providers.storage import save_file
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+# Statuses with nothing left to decide — these live in Case Files, not the Queue.
+_CASE_FILE_STATUSES = {"auto_approved", "rejected", "siu_confirmed_fraud", "siu_cleared"}
+
+
+def _decision_fields(claim: Claim, mod_action: ModeratorAction | None) -> dict:
+    """Work out who resolved this claim (if anyone) and which of the two tabs
+    it belongs in. A claim auto-approved by the detection pipeline stays visible
+    in the Queue (pinned first, review-only) until an officer marks the review
+    done; one resolved by a human (moderator approve/reject, or SIU quorum)
+    leaves the Queue entirely once decided."""
+    moderator_decision = mod_action.decision if mod_action else None
+    rejection_reason = mod_action.rejection_reason if mod_action and mod_action.decision == "rejected" else None
+    # "review_done" is an acknowledgement of a system decision, not a moderator decision
+    review_done = moderator_decision == "review_done"
+    if review_done:
+        moderator_decision = None
+
+    if claim.status == "auto_approved" and moderator_decision is None:
+        decided_by = "system"
+    elif claim.status == "auto_approved" and moderator_decision == "approved":
+        decided_by = "moderator"
+    elif claim.status == "rejected":
+        decided_by = "moderator"
+    elif claim.status in ("siu_confirmed_fraud", "siu_cleared"):
+        decided_by = "siu_quorum"
+    else:
+        decided_by = None
+
+    in_case_files = claim.status in _CASE_FILE_STATUSES
+    in_queue = claim.status in ("processing", "moderator_review", "siu_investigation") or (
+        claim.status == "auto_approved" and decided_by == "system" and not review_done
+    )
+
+    if claim.status == "processing":
+        queue_action = "processing"
+    elif claim.status == "moderator_review":
+        queue_action = "moderate"
+    elif claim.status == "siu_investigation":
+        queue_action = "siu_vote"
+    elif claim.status == "auto_approved" and decided_by == "system" and not review_done:
+        queue_action = "review_only"
+    else:
+        queue_action = None
+
+    return {
+        "moderator_decision": moderator_decision,
+        "rejection_reason": rejection_reason,
+        "decided_by": decided_by,
+        "in_queue": in_queue,
+        "in_case_files": in_case_files,
+        "queue_action": queue_action,
+    }
 
 # Strong reference set to prevent background tasks from being GC'd
 _background_tasks: set = set()
@@ -28,6 +84,7 @@ async def submit_claim(
     coverage_id: int = Form(...),
     accident_location: str = Form(...),
     accident_description: str = Form(...),
+    claim_amount: float = Form(...),
     video: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     audio: UploadFile = File(...),
@@ -43,6 +100,9 @@ async def submit_claim(
     policy = db.query(Policy).filter(Policy.id == coverage.policy_id).first()
     if not policy or policy.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Coverage does not belong to your policy.")
+
+    if claim_amount <= 0:
+        raise HTTPException(status_code=400, detail="Claim amount must be greater than zero.")
 
     # At least one visual evidence is required
     has_video = video and video.filename
@@ -85,6 +145,7 @@ async def submit_claim(
         video_url=video_url,
         image_url=image_url,
         audio_url=audio_url,
+        claim_amount_cents=round(claim_amount * 100),
         status="processing",
     )
     db.add(claim)
@@ -130,9 +191,10 @@ async def submit_claim(
 @router.get("/queue/all")
 def list_all_claims(
     status: Optional[str] = None,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
     db: DBSession = Depends(get_db),
 ):
-    """Dashboard endpoint: returns all claims for officers (no auth required for demo)."""
+    """Dashboard endpoint: returns all claims for authenticated officers."""
     query = db.query(Claim)
     if status:
         query = query.filter(Claim.status == status)
@@ -142,13 +204,22 @@ def list_all_claims(
     for c in claims:
         from app.models import User as UserModel
         user = db.query(UserModel).filter(UserModel.id == c.user_id).first()
+        policy = db.query(Policy).filter(Policy.id == c.policy_id).first() if c.policy_id else None
+        coverage = db.query(Coverage).filter(Coverage.id == c.coverage_id).first() if c.coverage_id else None
         docs = db.query(ClaimDocument).filter(ClaimDocument.claim_id == c.id).all()
         analyses = db.query(ClaimMediaAnalysis).filter(ClaimMediaAnalysis.claim_id == c.id).all()
+        mod_action = (
+            db.query(ModeratorAction)
+            .filter(ModeratorAction.claim_id == c.id)
+            .order_by(ModeratorAction.decided_at.desc())
+            .first()
+        )
 
         results.append({
             "id": c.id,
             "claim_number": c.claim_number,
             "claimant_name": user.full_name if user else "Unknown",
+            "claimant_email": user.email if user else None,
             "status": c.status,
             "accident_location": c.accident_location,
             "accident_description": c.accident_description,
@@ -157,9 +228,16 @@ def list_all_claims(
             "audio_url": c.audio_url,
             "fraud_confidence_score": c.fraud_confidence_score,
             "artifact_report": c.artifact_report,
+            "claim_amount_cents": c.claim_amount_cents,
+            "valuation_report": c.valuation_report,
             "payout_amount_cents": c.payout_amount_cents,
             "payout_transaction_id": c.payout_transaction_id,
             "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "policy_number": policy.policy_number if policy else None,
+            "policy_status": policy.status if policy else None,
+            "coverage_label": coverage.coverage_label if coverage else None,
+            "coverage_type": coverage.coverage_type if coverage else None,
             "documents": [{"id": d.id, "file_url": d.file_url, "file_type": d.file_type} for d in docs],
             "analyses": [
                 {"modality": a.modality, "provider": a.provider, "raw_score": a.raw_score, "findings_json": a.findings_json}
@@ -169,12 +247,17 @@ def list_all_claims(
                 {"action": a.action, "actor_type": a.actor_type, "actor_id": a.actor_id, "details_json": a.details_json, "created_at": a.created_at.isoformat() if a.created_at else None}
                 for a in db.query(AuditTrail).filter(AuditTrail.claim_id == c.id).order_by(AuditTrail.created_at.asc()).all()
             ],
+            **_decision_fields(c, mod_action),
         })
     return results
 
 
 @router.get("/trail/{claim_id}")
-def get_claim_audit_trail(claim_id: int, db: DBSession = Depends(get_db)):
+def get_claim_audit_trail(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Get the full lifecycle flowchart data for a claim."""
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     if not claim:
@@ -198,8 +281,48 @@ def get_claim_audit_trail(claim_id: int, db: DBSession = Depends(get_db)):
     }
 
 
+@router.get("/{claim_id}/score-breakdown")
+def get_score_breakdown(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
+    """Latest fusion-scoring ScoreBreakdown for the SIU explanation panel (append-only history)."""
+    import json
+    from app.scoring.persistence import ClaimScore
+
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found.")
+    rows = (
+        db.query(ClaimScore)
+        .filter(ClaimScore.claim_id == str(claim.claim_number))
+        .order_by(ClaimScore.version.desc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No score recorded for this claim.")
+    latest = rows[0]
+    return {
+        "claim_id": claim.id,
+        "claim_number": claim.claim_number,
+        "version": latest.version,
+        "config_version": latest.config_version,
+        "breakdown": json.loads(latest.breakdown_json),
+        "history": [
+            {"version": r.version, "final_score": r.final_score,
+             "routing_band": r.routing_band, "created_at": r.created_at.isoformat()}
+            for r in rows
+        ],
+    }
+
+
 @router.get("/report/{claim_id}")
-def get_artifact_report(claim_id: int, db: DBSession = Depends(get_db)):
+def get_artifact_report(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Get the full AI explainability report for a claim."""
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     if not claim:
@@ -215,11 +338,21 @@ def get_artifact_report(claim_id: int, db: DBSession = Depends(get_db)):
 
     analyses = db.query(ClaimMediaAnalysis).filter(ClaimMediaAnalysis.claim_id == claim_id).all()
 
+    valuation = {}
+    if claim.valuation_report:
+        try:
+            valuation = json.loads(claim.valuation_report)
+        except json.JSONDecodeError:
+            valuation = {"raw": claim.valuation_report}
+
     return {
         "claim_id": claim.id,
         "claim_number": claim.claim_number,
         "status": claim.status,
         "fraud_confidence_score": claim.fraud_confidence_score,
+        "claim_amount_cents": claim.claim_amount_cents,
+        "payout_amount_cents": claim.payout_amount_cents,
+        "valuation": valuation,
         "report": report,
         "raw_analyses": [
             {
@@ -234,7 +367,11 @@ def get_artifact_report(claim_id: int, db: DBSession = Depends(get_db)):
 
 
 @router.get("/report/{claim_id}/pdf")
-def download_report_pdf(claim_id: int, db: DBSession = Depends(get_db)):
+def download_report_pdf(
+    claim_id: int,
+    current_officer: ClaimsOfficer = Depends(get_current_officer),
+    db: DBSession = Depends(get_db),
+):
     """Download the artifact report as a professionally formatted PDF."""
     from fastapi.responses import Response
     from app.report_pdf import generate_report_pdf
@@ -341,6 +478,9 @@ def get_claim(
         "fraud_confidence_score": claim.fraud_confidence_score,
         "consistency_score": claim.consistency_score,
         "artifact_report": claim.artifact_report,
+        "claim_amount_cents": claim.claim_amount_cents,
+        "payout_amount_cents": claim.payout_amount_cents,
+        "payout_transaction_id": claim.payout_transaction_id,
         "coverage_id": claim.coverage_id,
         "policy_id": claim.policy_id,
         "created_at": claim.created_at.isoformat() if claim.created_at else None,

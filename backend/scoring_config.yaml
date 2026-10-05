@@ -1,0 +1,74 @@
+# SyntheticShield Fraud Fusion Scoring — design-stage defaults (pending calibration).
+# Every weight/penalty/threshold used by app/scoring lives here. Do NOT hard-code elsewhere.
+config_version: "0.1.0-design"
+
+fusion:
+  weights:
+    image: 0.22
+    video: 0.22
+    audio: 0.18
+    consistency: 0.20
+    metadata: 0.10
+    text: 0.08
+  escalation_threshold: 90
+  escalation_discount: 5
+  # Only Level 2 AI-manipulation signals can trigger worst-signal escalation.
+  # (Findings explicitly marked escalation_eligible, e.g. C-H3, are the designed exception.)
+  escalation_signals: [image, video, audio, text]
+  routing:
+    auto_approve_below: 15
+    siu_above: 85
+
+metadata:
+  high: 35
+  medium: 20
+  low: 8
+  credits:
+    c2pa: -25
+    intact_exif: -8
+  gps_radius_km: 25
+  phash_threshold: 6
+  modify_gap_hours: 1
+
+image_pixel:
+  component_weights:
+    ela: 0.20
+    jpeg_dq: 0.35
+    noise: 0.25
+    freq: 0.20
+  ela:
+    r0: 2.0
+    r1: 8.0
+    quality: 92
+  dq:
+    p0: 2.5
+    p1: 10.0
+  noise:
+    n0: 4.0
+    n1: 12.0
+  freq:
+    f0: 0.15
+    f1: 0.45
+
+video_pixel:
+  fps_sample: 1
+  max_frames: 60
+  min_anomalous_frames: 3
+
+providers:
+  timeout_s: 30
+  retries: 2
+
+text:
+  min_chars: 40   # demo calibration — spec default 300; raise once real text APIs are wired
+  disagreement_gap: 25
+
+consistency:
+  weather_window_h: 6
+  temporal_gap_h: 2
+  external_reverse_search: "suspicious_only"   # "always" | "suspicious_only"
+
+pricing:
+  cache_days: 7
+  labor_buffer: 0.35
+  min_price_points: 3

@@ -20,6 +20,7 @@ frontend/*/node_modules/
 frontend/*/dist/
 frontend/*/.vite/
 frontend/*/build/
+demo/node_modules/
 
 # Vector store (binary, regenerated at runtime)
 backend/app/chroma_store/

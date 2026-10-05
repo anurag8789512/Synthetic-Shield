@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { Shield, Bell, Search, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Shield, Bell, Search, ChevronDown, Plug, LogOut, Cable, KeyRound, BookOpen, Activity, Network } from 'lucide-react'
 import { C } from '../common/ui'
+import { fetchAllClaims } from '../../data/api'
 import ClaimsQueue from './ClaimsQueue'
 import Analytics from './Analytics'
 import CaseFiles from './CaseFiles'
@@ -17,21 +18,50 @@ interface LiveNotif {
   claimId?: number
 }
 
-export default function Dashboard({ role = 'senior' }: { role?: string }) {
+const ROLE_LABELS: Record<string, string> = {
+  senior: 'Senior Claims Adjuster',
+  siu_officer: 'SIU Officer',
+  moderator: 'Claims Moderator',
+}
+
+function initialsOf(name: string): string {
+  const parts = name.replace(/\./g, '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+export default function Dashboard({ role = 'senior', onLogout }: { role?: string; onLogout?: () => void }) {
   const [tab, setTab] = useState<Tab>('queue')
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifCount, setNotifCount] = useState(0)
   const [notifications, setNotifications] = useState<LiveNotif[]>([])
   const [search, setSearch] = useState('')
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const mcpRef = useRef<HTMLDivElement>(null)
+  const profileRef = useRef<HTMLDivElement>(null)
   const isLead = role === 'senior'
+
+  // close header dropdowns on outside click
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (mcpRef.current && !mcpRef.current.contains(e.target as Node)) setMcpOpen(false)
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  const officerName = sessionStorage.getItem('ss_officer_name') || 'Officer'
+  const officerRole = sessionStorage.getItem('ss_officer_role') || role
+  const officerRoleLabel = ROLE_LABELS[officerRole] || officerRole
 
   // Fetch live notifications from claims
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch('http://localhost:8000/claims/queue/all')
-        if (!res.ok) return
-        const claims = await res.json()
+        const claims = await fetchAllClaims()
         const notifs: LiveNotif[] = claims.slice(0, 6).map((c: any) => {
           const score = c.fraud_confidence_score ?? 0
           const dot = score > 85 ? C.red : score > 15 ? C.amber : C.green
@@ -163,14 +193,93 @@ export default function Dashboard({ role = 'senior' }: { role?: string }) {
           )}
         </div>
 
+        {/* MCP Server — external-system connectivity (demo menu; options go live with the MCP rollout) */}
+        <div ref={mcpRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => { setMcpOpen(v => !v); setProfileOpen(false) }}
+            title="MCP Server — connect external insurance systems"
+            style={{
+              height: 34, borderRadius: 8, border: `1px solid ${mcpOpen ? C.blue : C.border}`,
+              background: mcpOpen ? '#EFF6FF' : '#fff', display: 'flex', alignItems: 'center',
+              gap: 6, padding: '0 10px', cursor: 'pointer',
+            }}
+          >
+            <Plug size={14} color={mcpOpen ? C.blue : C.muted} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: mcpOpen ? C.blue : C.muted }}>MCP</span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.green }} />
+          </button>
+          {mcpOpen && (
+            <div style={{ position: 'absolute', top: 42, right: 0, width: 280, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.1)', zIndex: 200, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Plug size={12} color={C.blue} /> MCP Server
+                </div>
+                <div style={{ fontSize: 9.5, color: C.mutedLight, marginTop: 3, lineHeight: 1.4 }}>
+                  Connect external insurance systems and AI agents to SyntheticShield via the Model Context Protocol.
+                </div>
+              </div>
+              <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 10, color: C.textSub, fontFamily: 'monospace' }}>http://localhost:8000/mcp</span>
+                <span style={{ fontSize: 9, fontWeight: 700, color: C.green, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.green }} /> READY
+                </span>
+              </div>
+              {([
+                [Network, 'Connected Systems', '0 external systems linked'],
+                [Cable, 'Tool Catalog', 'submit_claim · score_breakdown · evidence'],
+                [KeyRound, 'API Keys & Access', 'Manage partner credentials'],
+                [Activity, 'Connection Logs', 'Tool-call audit history'],
+                [BookOpen, 'Integration Guide', 'Connect Guidewire, Duck Creek & agents'],
+              ] as const).map(([Icon, label, hint]) => (
+                <div
+                  key={label}
+                  onClick={() => setMcpOpen(false)}
+                  style={{ padding: '9px 14px', display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', transition: 'background 0.1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#F8FAFC')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <Icon size={13} color={C.muted} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: C.text }}>{label}</div>
+                    <div style={{ fontSize: 9, color: C.mutedLight, marginTop: 1 }}>{hint}</div>
+                  </div>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: '#D97706', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 4, padding: '1px 5px' }}>SOON</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Profile */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: '5px 10px 5px 6px', cursor: 'pointer' }}>
-          <div style={{ width: 24, height: 24, borderRadius: 6, background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff' }}>KR</div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.text, lineHeight: 1 }}>K. Rodriguez</div>
-            <div style={{ fontSize: 9, color: C.mutedLight, lineHeight: 1, marginTop: 2 }}>Senior Claims Adjuster</div>
+        <div ref={profileRef} style={{ position: 'relative' }}>
+          <div
+            onClick={() => { setProfileOpen(v => !v); setMcpOpen(false) }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: profileOpen ? '#EFF6FF' : C.bg, border: `1px solid ${profileOpen ? C.blue : C.border}`, borderRadius: 8, padding: '5px 10px 5px 6px', cursor: 'pointer' }}
+          >
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: C.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff' }}>{initialsOf(officerName)}</div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, lineHeight: 1 }}>{officerName}</div>
+              <div style={{ fontSize: 9, color: C.mutedLight, lineHeight: 1, marginTop: 2 }}>{officerRoleLabel}</div>
+            </div>
+            <ChevronDown size={11} color={C.mutedLight} style={{ transform: profileOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
           </div>
-          <ChevronDown size={11} color={C.mutedLight} />
+          {profileOpen && (
+            <div style={{ position: 'absolute', top: 42, right: 0, width: 200, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.1)', zIndex: 200, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.text }}>{officerName}</div>
+                <div style={{ fontSize: 9, color: C.mutedLight, marginTop: 2 }}>{officerRoleLabel}</div>
+              </div>
+              <div
+                onClick={() => { setProfileOpen(false); onLogout?.() }}
+                style={{ padding: '10px 14px', display: 'flex', gap: 9, alignItems: 'center', cursor: 'pointer', transition: 'background 0.1s' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#FFF5F5')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <LogOut size={13} color={C.red} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.red }}>Log out</span>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 

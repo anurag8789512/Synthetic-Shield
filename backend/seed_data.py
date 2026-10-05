@@ -1,6 +1,7 @@
 """Seed the database with test data including the primary test user."""
 from app.database import engine, SessionLocal, Base
 from app.models import User, Policy, Coverage, ClaimsOfficer
+from app.security import hash_password
 
 Base.metadata.create_all(bind=engine)
 
@@ -65,7 +66,7 @@ def seed():
     officer = ClaimsOfficer(
         name="Krishna Anurag",
         email="krishnaanurag16@gmail.com",
-        password_hash="shield@123",
+        password_hash=hash_password("shield@123"),
         role="senior",
         department="SIU",
     )
@@ -73,11 +74,11 @@ def seed():
 
     # ── 5 SIU officers for quorum voting ──────────────────────────────────
     test_officers = [
-        ClaimsOfficer(name="D. Torres", email="d.torres@syntheticshield.demo", password_hash="demo123", role="siu_officer", department="SIU"),
-        ClaimsOfficer(name="R. Park", email="r.park@syntheticshield.demo", password_hash="demo123", role="siu_officer", department="SIU"),
-        ClaimsOfficer(name="S. Okonkwo", email="s.okonkwo@syntheticshield.demo", password_hash="demo123", role="siu_officer", department="SIU"),
-        ClaimsOfficer(name="M. Reyes", email="m.reyes@syntheticshield.demo", password_hash="demo123", role="siu_officer", department="SIU"),
-        ClaimsOfficer(name="J. Chen", email="j.chen@syntheticshield.demo", password_hash="demo123", role="moderator", department="Claims"),
+        ClaimsOfficer(name="Sarayu Vishlawath", email="sarayu.vishlawath@syntheticshield.demo", password_hash=hash_password("demo123"), role="siu_officer", department="SIU"),
+        ClaimsOfficer(name="Abhishek Konnur", email="abhishek.konnur@syntheticshield.demo", password_hash=hash_password("demo123"), role="siu_officer", department="SIU"),
+        ClaimsOfficer(name="Felina Menezes", email="felina.menezes@syntheticshield.demo", password_hash=hash_password("demo123"), role="siu_officer", department="SIU"),
+        ClaimsOfficer(name="Arjun Premanathan", email="arjun.premanathan@syntheticshield.demo", password_hash=hash_password("demo123"), role="siu_officer", department="SIU"),
+        ClaimsOfficer(name="Priya Jha", email="priya.jha@syntheticshield.demo", password_hash=hash_password("demo123"), role="moderator", department="Claims"),
     ]
     db.add_all(test_officers)
 

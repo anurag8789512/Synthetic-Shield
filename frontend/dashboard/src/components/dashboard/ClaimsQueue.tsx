@@ -3,12 +3,13 @@ import {
   Search, Layers, Eye, AlertTriangle, CheckCircle, XCircle,
   Car, Clock, FileText, Send, Inbox, Loader,
 } from 'lucide-react'
-import { type Claim, scoreToStatus } from '../../data/types'
+import { type Claim, scoreToStatus, parseScoreBreakdown, type ScoreBreakdown } from '../../data/types'
 import {
   fetchAllClaims, getForensicAuditUrl, copilotChat, fetchCopilotHistory,
-  fetchOfficers, fetchSiuStatus, castSiuVote, moderatorApprove, moderatorReject,
+  fetchSiuStatus, castSiuVote, moderatorApprove, moderatorReject, markReviewDone,
 } from '../../data/api'
 import { StatusPill, RiskBadge, SectionHeading, Btn, C } from '../common/ui'
+import { ScoreBreakdownPanel } from './ScoreBreakdownPanel'
 
 function apiClaimToLocal(c: any): Claim {
   const score = c.fraud_confidence_score ?? 0
@@ -28,6 +29,7 @@ function apiClaimToLocal(c: any): Claim {
 
   let reportSummary, reportRecommendation
   let modalityExplanations: { modality: string; score: number; explanation: string }[] = []
+  let scoreBreakdown: ScoreBreakdown | undefined
   try {
     const report = JSON.parse(c.artifact_report)
     reportSummary = report?.summary
@@ -35,6 +37,7 @@ function apiClaimToLocal(c: any): Claim {
     modalityExplanations = (report?.modality_reports || []).map((m: any) => ({
       modality: m.modality, score: m.raw_score, explanation: m.explanation || '',
     }))
+    scoreBreakdown = parseScoreBreakdown(report)
   } catch { /* no report yet */ }
 
   return {
@@ -64,9 +67,22 @@ function apiClaimToLocal(c: any): Claim {
     modalities: c.analyses?.length || 0,
     payoutAmountCents: c.payout_amount_cents ?? undefined,
     payoutTransactionId: c.payout_transaction_id ?? undefined,
+    claimAmountCents: c.claim_amount_cents ?? undefined,
     reportSummary,
     reportRecommendation,
     modalityExplanations,
+    scoreBreakdown,
+    inQueue: !!c.in_queue,
+    inCaseFiles: !!c.in_case_files,
+    queueAction: c.queue_action ?? null,
+    decidedBy: c.decided_by ?? null,
+    moderatorDecision: c.moderator_decision ?? null,
+    rejectionReason: c.rejection_reason ?? undefined,
+    policyNumber: c.policy_number ?? undefined,
+    policyStatus: c.policy_status ?? undefined,
+    coverageLabel: c.coverage_label ?? undefined,
+    claimantEmail: c.claimant_email ?? undefined,
+    updatedAt: c.updated_at ?? undefined,
   }
 }
 
@@ -79,7 +95,12 @@ function useLiveClaims() {
     const load = async () => {
       const data = await fetchAllClaims()
       if (active && Array.isArray(data)) {
-        setLiveClaims(data.map(apiClaimToLocal))
+        // Claims Queue = still-pending claims, plus system auto-approved ones
+        // pinned first for review-only visibility (see claims.py::_decision_fields).
+        // Anything a moderator/SIU quorum has already decided moves to Case Files.
+        const queued = data.map(apiClaimToLocal).filter(c => c.inQueue)
+        queued.sort((a, b) => (a.queueAction === 'review_only' ? 0 : 1) - (b.queueAction === 'review_only' ? 0 : 1))
+        setLiveClaims(queued)
         setLoaded(true)
       }
     }
@@ -233,10 +254,13 @@ function SIUVoting({ claim }: { claim: Claim }) {
   const [pendingVote, setPendingVote] = useState<Record<number, 'confirm_fraud' | 'clear' | undefined>>({})
   const [error, setError] = useState('')
 
+  // The panel comes from the backend (officers actually assigned to this claim),
+  // not from filtering the full roster by role — that's what previously let the
+  // rendered panel be smaller than required_votes, making quorum unreachable.
   const load = async () => {
-    const [offs, status] = await Promise.all([fetchOfficers(), fetchSiuStatus(claim.backendId)])
-    setOfficers((offs || []).filter((o: any) => o.role === 'siu_officer'))
+    const status = await fetchSiuStatus(claim.backendId)
     setSiuStatus(status)
+    setOfficers((status?.panel || []).map((p: any) => ({ id: p.officer_id, name: p.name, role: p.role })))
   }
 
   useEffect(() => { load() }, [claim.backendId])
@@ -278,7 +302,7 @@ function SIUVoting({ claim }: { claim: Claim }) {
     <div>
       <div style={{ background: '#FFF5F5', border: `1px solid #FECACA`, borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: C.red }}>SIU Quorum Required</span>
-        <span style={{ fontSize: 11, color: C.muted }}>{siuStatus?.votes_cast ?? 0} of {siuStatus?.required_votes ?? 4} votes cast</span>
+        <span style={{ fontSize: 11, color: C.muted }}>{siuStatus?.votes_cast ?? 0} of {siuStatus?.required_votes ?? officers.length} votes cast</span>
       </div>
       {error && (
         <div style={{ background: '#FFF5F5', border: '1px solid #FECACA', borderRadius: 7, padding: '6px 10px', marginBottom: 8, fontSize: 10, color: C.red }}>{error}</div>
@@ -295,7 +319,7 @@ function SIUVoting({ claim }: { claim: Claim }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: !cast && sel ? 8 : 0 }}>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 600, color: C.text }}>{o.name}</div>
-                  <div style={{ fontSize: 9, color: C.mutedLight }}>SIU Officer</div>
+                  <div style={{ fontSize: 9, color: C.mutedLight }}>{o.role === 'senior' ? 'Senior Officer' : o.role === 'moderator' ? 'Moderator' : 'SIU Officer'}</div>
                 </div>
                 {cast ? (
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: cast.vote === 'confirm_fraud' ? '#FFF5F5' : '#F0FDF4', border: `1px solid ${cast.vote === 'confirm_fraud' ? '#FECACA' : '#BBF7D0'}`, color: cast.vote === 'confirm_fraud' ? C.red : C.green }}>
@@ -333,6 +357,39 @@ function SIUVoting({ claim }: { claim: Claim }) {
 }
 
 // ── Moderator Actions (live) ──────────────────────────────────────────────────
+function ReviewDoneAction({ claim }: { claim: Claim }) {
+  const [state, setState] = useState<'idle' | 'working' | 'done'>('idle')
+  const [error, setError] = useState('')
+
+  const complete = async () => {
+    setState('working'); setError('')
+    try { await markReviewDone(claim.backendId); setState('done') }
+    catch (e: any) { setError(e.message); setState('idle') }
+  }
+
+  if (state === 'done') return (
+    <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
+      <CheckCircle size={16} color={C.green} />
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Review recorded</div>
+        <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{claim.id} is moving to Case Files.</div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {error && (
+        <div style={{ background: '#FFF5F5', border: '1px solid #FECACA', borderRadius: 7, padding: '6px 10px', fontSize: 10, color: C.red }}>{error}</div>
+      )}
+      <Btn fullWidth variant="success" onClick={complete} disabled={state === 'working'}>
+        <CheckCircle size={13} /> {state === 'working' ? 'Recording…' : 'Review Done'}
+      </Btn>
+    </div>
+  )
+}
+
+
 function ModeratorActions({ claim }: { claim: Claim }) {
   const [state, setState] = useState<'idle' | 'rejecting' | 'working' | 'approved' | 'rejected'>('idle')
   const [reason, setReason] = useState('')
@@ -489,6 +546,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
                     <Car size={9} color="#CBD5E1" />
                     <span style={{ fontSize: 10, color: C.mutedLight }}>{c.incidentType}</span>
                     {c.isLive && <span style={{ fontSize: 8, fontWeight: 700, background: '#FEE2E2', color: C.red, border: '1px solid #FECACA', borderRadius: 3, padding: '0 4px' }}>LIVE</span>}
+                    {c.queueAction === 'review_only' && <span style={{ fontSize: 8, fontWeight: 700, background: '#F0FDF4', color: C.green, border: '1px solid #BBF7D0', borderRadius: 3, padding: '0 4px' }}>REVIEW ONLY</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                     <Clock size={9} color="#CBD5E1" />
@@ -564,7 +622,10 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
             <SectionHeading>Incident Details</SectionHeading>
             <div style={{ fontSize: 11, color: C.textSub, lineHeight: 1.6 }}>
               {claim.location && <div style={{ marginBottom: 4 }}><strong>Location:</strong> {claim.location}</div>}
-              {claim.description && <div><strong>Description:</strong> {claim.description}</div>}
+              {claim.description && <div style={{ marginBottom: claim.claimAmountCents != null ? 4 : 0 }}><strong>Description:</strong> {claim.description}</div>}
+              {claim.claimAmountCents != null && (
+                <div><strong>Claim Amount:</strong> ${(claim.claimAmountCents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              )}
             </div>
           </div>
 
@@ -589,7 +650,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           <div style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace', marginTop: 1 }}>{claim.modalities} signals analyzed · {claim.time}</div>
           {/* Sub-nav */}
           <div style={{ display: 'flex', gap: 2, marginTop: 8 }}>
-            {([['analysis', 'Findings'], ['copilot', 'AI Copilot'], ['voting', claim.status === 'siu' ? 'SIU Vote' : claim.status === 'approved' ? 'Details' : 'Actions']] as const).map(([id, label]) => (
+            {([['analysis', 'Findings'], ['copilot', 'AI Copilot'], ['voting', claim.backendStatus === 'siu_investigation' ? 'SIU Vote' : claim.queueAction === 'review_only' ? 'Details' : 'Actions']] as const).map(([id, label]) => (
               <button key={id} onClick={() => setRightSection(id as typeof rightSection)} style={{ flex: 1, padding: '4px 0', borderRadius: 5, border: `1px solid ${rightSection === id ? C.blue : C.border}`, background: rightSection === id ? '#EFF6FF' : '#fff', color: rightSection === id ? C.blue : C.muted, fontSize: 10, fontWeight: rightSection === id ? 700 : 400, cursor: 'pointer' }}>
                 {label}
               </button>
@@ -606,6 +667,9 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
               <div style={{ background: claim.score > 85 ? '#FFF5F5' : claim.score >= 15 ? '#FFFBEB' : '#F0FDF4', border: `1px solid ${claim.score > 85 ? '#FECACA' : claim.score >= 15 ? '#FDE68A' : '#BBF7D0'}`, borderRadius: 10, padding: '14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <FraudGauge score={claim.score} />
               </div>
+
+              {/* Per-level score division — shown for every claim, fraud or not */}
+              {claim.scoreBreakdown && <ScoreBreakdownPanel breakdown={claim.scoreBreakdown} />}
 
               {/* AI Findings */}
               <div>
@@ -655,18 +719,20 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           {/* ── Actions / Voting ── */}
           {rightSection === 'voting' && (
             <>
-              {claim.status === 'siu' && <SIUVoting key={claim.id} claim={claim} />}
-              {claim.status === 'review' && <ModeratorActions key={claim.id} claim={claim} />}
-              {claim.status === 'approved' && (
+              {claim.backendStatus === 'siu_investigation' && <SIUVoting key={claim.id} claim={claim} />}
+              {claim.queueAction !== 'review_only' && claim.backendStatus !== 'siu_investigation' && (
+                <ModeratorActions key={claim.id} claim={claim} />
+              )}
+              {claim.queueAction === 'review_only' && (
                 <>
-                  {/* Payout already completed — no officer action needed */}
+                  {/* System auto-approved — visible for review, no action needed or possible */}
                   <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '14px' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                       <CheckCircle size={18} color={C.green} />
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Auto-Approved — Payout Complete</div>
                     </div>
                     <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
-                      This claim passed AI verification and was paid automatically. No officer action is required.
+                      This claim passed AI verification and was paid automatically. No officer action is required — it also appears in Case Files for the permanent record.
                     </div>
                     {claim.payoutAmountCents != null && (
                       <div style={{ marginTop: 10, background: '#fff', border: '1px solid #BBF7D0', borderRadius: 7, padding: '8px 12px' }}>
@@ -702,6 +768,9 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
                       )}
                     </div>
                   )}
+
+                  {/* Officer acknowledges the review — claim leaves the Queue for Case Files */}
+                  <ReviewDoneAction key={claim.id} claim={claim} />
                 </>
               )}
               <div style={{ marginTop: 4 }}>

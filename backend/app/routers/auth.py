@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import or_
 
@@ -14,8 +14,21 @@ from app.schemas import (
 from app.config import settings
 from app.providers.otp_provider import generate_otp, send_otp, send_otp_async, otp_expiry
 from app.agents.audit_logger import log_event
+from app.security import verify_password, hash_password, is_bcrypt_hash
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/logout")
+def logout(authorization: str = Header(default=""), db: DBSession = Depends(get_db)):
+    """Invalidate the caller's session token (works for both user and officer sessions)."""
+    token = authorization.removeprefix("Bearer ").strip()
+    if token:
+        session = db.query(Session).filter(Session.token == token).first()
+        if session:
+            db.delete(session)
+            db.commit()
+    return {"status": "logged_out"}
 
 
 @router.post("/request-otp", response_model=OTPResponse)
@@ -82,6 +95,7 @@ def verify_otp(body: OTPVerify, db: DBSession = Depends(get_db)):
     session = Session(
         token=token,
         user_id=user.id,
+        owner_type="user",
         expires_at=datetime.utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS),
     )
     db.add(session)
@@ -92,16 +106,27 @@ def verify_otp(body: OTPVerify, db: DBSession = Depends(get_db)):
 
 @router.post("/dashboard-login", response_model=DashboardLoginResponse)
 def dashboard_login(body: DashboardLoginRequest, db: DBSession = Depends(get_db)):
-    """Simple credential check for SIU dashboard officers."""
+    """Credential check for SIU dashboard officers."""
     officer = db.query(ClaimsOfficer).filter(ClaimsOfficer.email == body.email).first()
-
-    if not officer or officer.password_hash != body.password:
+    if not officer or not officer.password_hash:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    if is_bcrypt_hash(officer.password_hash):
+        if not verify_password(body.password, officer.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+    else:
+        # Legacy plaintext row from before password hashing was added — verify
+        # directly once, then transparently upgrade it to a real hash.
+        if officer.password_hash != body.password:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        officer.password_hash = hash_password(body.password)
+        db.commit()
 
     token = secrets.token_urlsafe(32)
     session = Session(
         token=token,
         user_id=officer.id,
+        owner_type="officer",
         expires_at=datetime.utcnow() + timedelta(hours=settings.SESSION_EXPIRY_HOURS),
     )
     db.add(session)

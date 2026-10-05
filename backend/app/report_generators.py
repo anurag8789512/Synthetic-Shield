@@ -87,7 +87,7 @@ REPORT_CONTENT = {
         "sections": [
             ("Overview", "Weekly summary of SIU investigation outcomes and officer activity across all active cases during the reporting period."),
             ("Case Statistics", "• Total cases reviewed: 18\n• Confirmed fraud: 12 (66.7%)\n• Cleared: 4 (22.2%)\n• Pending: 2 (11.1%)\n• Average resolution time: 3.2 business days"),
-            ("Officer Activity", "• D. Torres: 6 cases reviewed, 5 fraud confirmed\n• R. Park: 5 cases reviewed, 3 fraud confirmed\n• S. Okonkwo: 4 cases reviewed, 2 fraud confirmed\n• M. Reyes: 3 cases reviewed, 2 fraud confirmed"),
+            ("Officer Activity", "• Sarayu Vishlawath: 6 cases reviewed, 5 fraud confirmed\n• Abhishek Konnur: 5 cases reviewed, 3 fraud confirmed\n• Felina Menezes: 4 cases reviewed, 2 fraud confirmed\n• Arjun Premanathan: 3 cases reviewed, 2 fraud confirmed"),
             ("Notable Cases", "CLM-2026-00042: Highest confidence synthetic score (94%) — confirmed as AI-generated bumper damage paired with cloned voice statement. Referred to local authorities.\n\nCLM-2026-00028: Complex multi-modal fraud involving doctored dashcam footage and synthetic police report. Full investigation report attached."),
         ],
     },
@@ -210,7 +210,7 @@ def generate_case_file_pdf(case: dict) -> bytes:
 
 # ── Forensic Audit Report (per claim) ────────────────────────────────────────
 
-def generate_forensic_audit_pdf(claim_data: dict, policy_data: dict, user_data: dict, analyses: list, audit_trail: list) -> bytes:
+def generate_forensic_audit_pdf(claim_data: dict, policy_data: dict, user_data: dict, analyses: list, audit_trail: list, score_breakdown: dict | None = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.5*cm, bottomMargin=2*cm, leftMargin=2*cm, rightMargin=2*cm)
     styles = _base_styles()
@@ -242,15 +242,67 @@ def generate_forensic_audit_pdf(claim_data: dict, policy_data: dict, user_data: 
     elements.append(Paragraph(f"<b>Incident:</b> {claim_data.get('accident_description', 'N/A')}", styles["Body"]))
     elements.append(Spacer(1, 4*mm))
 
+    # Fusion score breakdown by analysis level
+    section_no = 2
+    if score_breakdown:
+        elements.append(Paragraph(f"{section_no}. Fraud Score Division by Analysis Level", styles["SectionHead"]))
+        section_no += 1
+
+        LEVEL_OF = {"metadata": "Level 1 · Metadata Analysis",
+                    "image": "Level 2 · AI Manipulation", "video": "Level 2 · AI Manipulation",
+                    "audio": "Level 2 · AI Manipulation", "text": "Level 2 · AI Manipulation",
+                    "consistency": "Level 3 · Consistency Check"}
+        weights = score_breakdown.get("weights_used", {})
+        rows = [["Level", "Signal", "Score", "Weight", "Status"]]
+        for sub in score_breakdown.get("subscores", []):
+            name = sub.get("name", "")
+            value = sub.get("value")
+            w = weights.get(name)
+            rows.append([
+                LEVEL_OF.get(name, "Level 2 · AI Manipulation"),
+                name.capitalize(),
+                f"{value:.1f} / 100" if value is not None else "—",
+                f"{w:.0%}" if w is not None else "—",
+                sub.get("status", "ok").replace("_", " "),
+            ])
+        bt = Table(rows, colWidths=[140, 80, 75, 60, 115])
+        bt.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_LIGHT),
+            ("TEXTCOLOR", (0, 0), (-1, 0), BRAND_MUTED),
+            ("BOX", (0, 0), (-1, -1), 0.5, BRAND_BORDER), ("INNERGRID", (0, 0), (-1, -1), 0.25, BRAND_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(bt)
+        elements.append(Spacer(1, 2*mm))
+
+        fusion_line = (f"<b>Base score:</b> {score_breakdown.get('base_score', 0):.1f} · "
+                       f"<b>Final score:</b> {score_breakdown.get('final_score', 0):.1f} · "
+                       f"<b>Routing:</b> {str(score_breakdown.get('routing_band', '')).replace('_', ' ').title()}")
+        if score_breakdown.get("escalated"):
+            fusion_line += f" · <b>Worst-signal escalation:</b> fired via {score_breakdown.get('escalation_source')}"
+        if score_breakdown.get("forced_review_reason"):
+            fusion_line += f" · <b>Forced review:</b> {score_breakdown.get('forced_review_reason')}"
+        elements.append(Paragraph(fusion_line, styles["Body"]))
+        elements.append(Paragraph(
+            f"Scoring engine config {score_breakdown.get('config_version', 'n/a')} · "
+            f"score version {score_breakdown.get('version', 1)} · weights re-normalized over available signals.",
+            styles["SmallGray"]))
+        elements.append(Spacer(1, 4*mm))
+
     # Per-modality analysis
-    elements.append(Paragraph("2. Multi-Modal Detection Analysis", styles["SectionHead"]))
+    elements.append(Paragraph(f"{section_no}. Multi-Modal Detection Analysis", styles["SectionHead"]))
+    section_no += 1
     for a in analyses:
         modality = a.get("modality", "unknown").capitalize()
-        score = a.get("raw_score", 0)
+        score = a.get("raw_score")
         provider = a.get("provider", "mock").replace("_", " ").title()
-        sev_label = "LOW" if score < 30 else "MEDIUM" if score <= 70 else "HIGH"
-
-        elements.append(Paragraph(f"<b>{modality}</b> — Score: {score:.1f}% ({sev_label}) — Provider: {provider}", styles["Body"]))
+        if score is None:
+            # signal was unavailable/not applicable (e.g. vendor outage, no media)
+            elements.append(Paragraph(f"<b>{modality}</b> — Score: unavailable — Provider: {provider}", styles["Body"]))
+        else:
+            sev_label = "LOW" if score < 30 else "MEDIUM" if score <= 70 else "HIGH"
+            elements.append(Paragraph(f"<b>{modality}</b> — Score: {score:.1f}% ({sev_label}) — Provider: {provider}", styles["Body"]))
 
         findings_data = a.get("findings_json", "{}")
         if isinstance(findings_data, str):
@@ -269,7 +321,7 @@ def generate_forensic_audit_pdf(claim_data: dict, policy_data: dict, user_data: 
 
     # Audit trail
     if audit_trail:
-        elements.append(Paragraph("3. Audit Trail", styles["SectionHead"]))
+        elements.append(Paragraph(f"{section_no}. Audit Trail", styles["SectionHead"]))
         trail_data = [["Time", "Actor", "Action", "Details"]]
         for t in audit_trail:
             ts = (t.get("created_at") or t.get("timestamp") or "")

@@ -280,11 +280,11 @@ npm run dev          # -> http://localhost:3001
 | Name | Email | Password | Role |
 |------|-------|----------|------|
 | Krishna Anurag | krishnaanurag16@gmail.com | shield@123 | Lead Officer |
-| D. Torres | d.torres@syntheticshield.demo | demo123 | SIU Officer |
-| R. Park | r.park@syntheticshield.demo | demo123 | SIU Officer |
-| S. Okonkwo | s.okonkwo@syntheticshield.demo | demo123 | SIU Officer |
-| M. Reyes | m.reyes@syntheticshield.demo | demo123 | SIU Officer |
-| J. Chen | j.chen@syntheticshield.demo | demo123 | Moderator |
+| Sarayu Vishlawath | sarayu.vishlawath@syntheticshield.demo | demo123 | SIU Officer |
+| Abhishek Konnur | abhishek.konnur@syntheticshield.demo | demo123 | SIU Officer |
+| Felina Menezes | felina.menezes@syntheticshield.demo | demo123 | SIU Officer |
+| Arjun Premanathan | arjun.premanathan@syntheticshield.demo | demo123 | SIU Officer |
+| Priya Jha | priya.jha@syntheticshield.demo | demo123 | Moderator |
 
 ---
 
@@ -324,6 +324,7 @@ All keys go in `backend/.env`. None are required for a zero-config local run.
   MISTRAL_API_KEY=your_key_here
   MISTRAL_MODEL=mistral-small-latest
   ```
+- **Note:** the Copilot's "deeper reanalysis" tool (`run_image_forensics_reanalysis`) sends the claim photo to the model, which `mistral-small-latest` cannot read. Use a vision-capable model (e.g. `pixtral-12b-2409` or `mistral-medium-latest`) if you want that tool to work — otherwise it fails gracefully and the officer is told the specialist call failed.
 
 ### Google Gemini — LLM Copilot (alternative to Mistral)
 - **What it does:** Alternative LLM backend for the Copilot
