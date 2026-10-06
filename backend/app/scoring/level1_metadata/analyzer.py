@@ -101,6 +101,8 @@ def extract_image_meta(path: Path) -> dict:
     meta["software"] = _s(zeroth.get(_p.ImageIFD.Software)) or None
     meta["modify_date"] = _s(zeroth.get(_p.ImageIFD.DateTime)) or None
     meta["datetime_original"] = _s(exif_ifd.get(_p.ExifIFD.DateTimeOriginal)) or None
+    # EXIF 2.31 OffsetTimeOriginal (tag 36881), e.g. "+05:30" — lets us convert to UTC
+    meta["offset_time_original"] = _s(exif_ifd.get(36881)) or None
 
     if gps_ifd.get(_p.GPSIFD.GPSLatitude) and gps_ifd.get(_p.GPSIFD.GPSLongitude):
         def _dms(dms, ref):
@@ -140,6 +142,7 @@ def extract_container_meta(path: Path) -> dict:
         tags = (data.get("format") or {}).get("tags") or {}
         meta["software"] = tags.get("encoder") or tags.get("com.apple.quicktime.software")
         meta["datetime_original"] = (tags.get("creation_time") or "").replace("T", " ").split(".")[0] or None
+        meta["datetime_is_utc"] = True  # container creation_time is ISO-8601 UTC
         meta["make"] = tags.get("com.apple.quicktime.make")
         meta["model"] = tags.get("com.apple.quicktime.model")
         loc = tags.get("location") or tags.get("com.apple.quicktime.location.ISO6709")
@@ -169,11 +172,13 @@ class MetadataAnalyzer:
         cfg = self.config.metadata
         claimed_latlon = parse_latlon(claimed_location)
         findings: list[Finding] = []
+        analyzed_any = False
 
         for f in files:
             path: Path = Path(f["path"])
             if not path.exists():
                 continue
+            analyzed_any = True
             file_id = path.name
             media_type = f["media_type"]
             captured_in_app = bool(f.get("captured_in_app"))
@@ -204,7 +209,8 @@ class MetadataAnalyzer:
                 exif_rules.rule_m_h4_duplicate_evidence(cfg, file_id, matches),
                 exif_rules.rule_m_m1_modify_gap(meta, cfg, file_id),
                 exif_rules.rule_m_m2_timezone_inconsistency(meta, cfg, file_id),
-                exif_rules.rule_m_m4_missing_camera_fields(meta, cfg, file_id, captured_in_app),
+                exif_rules.rule_m_m4_missing_camera_fields(meta, cfg, file_id,
+                                                           captured_in_app and media_type in ("image", "video")),
                 exif_rules.rule_m_c1_c2pa(str(path), cfg, file_id),
                 exif_rules.rule_m_c2_intact_exif(meta, cfg, file_id, claimed_latlon, submission_dt),
             ]
@@ -213,6 +219,8 @@ class MetadataAnalyzer:
                 checks.append(exif_rules.rule_m_l1_missing_exif(meta, cfg, file_id, captured_in_app))
             findings.extend(c for c in checks if c)
 
+        if not analyzed_any:
+            return SubScore(name="metadata", status="not_applicable", provider="in_house_metadata_v1")
         total = sum(f.points for f in findings)
         value = max(0.0, min(100.0, total))
         return SubScore(name="metadata", value=value, status="ok",

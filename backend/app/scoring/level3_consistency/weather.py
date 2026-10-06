@@ -53,12 +53,17 @@ class OpenWeatherProvider(WeatherProvider):
 
 
 class MockWeatherProvider(WeatherProvider):
+    """Deterministic stand-in. Confirms claimed weather by default (demo claims
+    never get a fabricated C-H2); pass contradicted_events={"hail", ...} to
+    simulate records that contradict specific claims."""
     provider_name = "mock"
+
+    def __init__(self, contradicted_events: set[str] | None = None):
+        self.contradicted_events = set(contradicted_events or ())
 
     async def had_event(self, lat: float, lon: float, when: datetime,
                         event: str, window_h: float) -> bool | None:
-        # Deterministic: mock confirms the event unless testing hook says otherwise
-        return True
+        return event not in self.contradicted_events
 
 
 def get_weather_provider() -> WeatherProvider:

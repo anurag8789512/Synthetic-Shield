@@ -73,6 +73,7 @@ class Claim(Base):
     coverage_id = Column(Integer, ForeignKey("coverages.id"))
     accident_location = Column(String)
     accident_description = Column(Text)
+    incident_at = Column(DateTime, nullable=True)  # claimant-reported, local time
     video_url = Column(String)
     image_url = Column(String)
     audio_url = Column(String)

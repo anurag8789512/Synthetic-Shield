@@ -489,6 +489,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
   const [location, setLocation] = useState('')
   const [description, setDescription] = useState('')
   const [claimAmount, setClaimAmount] = useState('')
+  const [incidentAt, setIncidentAt] = useState('')
   const [videoUploadState, setVideoUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [imageUploadState, setImageUploadState] = useState<'idle' | 'uploading' | 'done'>('idle')
@@ -498,6 +499,10 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
   const [recordError, setRecordError] = useState('')
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [audioPlaybackUrl, setAudioPlaybackUrl] = useState('')
+  const [audioMode, setAudioMode] = useState<'record' | 'upload'>('record')
+  const [audioUploadFile, setAudioUploadFile] = useState<File | null>(null)
+  const [audioUploadUrl, setAudioUploadUrl] = useState('')
+  const [audioUploadError, setAudioUploadError] = useState('')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const [pdfState, setPdfState] = useState<'idle' | 'error' | 'done'>('idle')
@@ -509,6 +514,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
   const videoInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
+  const audioFileInputRef = useRef<HTMLInputElement>(null)
   const { policy } = usePolicy()
   const coverages = policy?.coverages ?? []
 
@@ -516,7 +522,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
     step === 0 ? !!coverage && !!location && !!description && Number(claimAmount) > 0 :
     step === 1 ? videoUploadState === 'done' :
     step === 2 ? imageUploadState === 'done' :
-    step === 3 ? recordState === 'done' :
+    step === 3 ? (audioMode === 'record' ? recordState === 'done' : !!audioUploadFile) :
     true // steps D and E always can proceed
 
   const toggleRecord = async () => {
@@ -553,6 +559,36 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
     setAudioPlaybackUrl('')
     setRecordState('idle')
     setRecordSecs(0)
+  }
+
+  const resetAudioUpload = () => {
+    if (audioUploadUrl) URL.revokeObjectURL(audioUploadUrl)
+    setAudioUploadFile(null)
+    setAudioUploadUrl('')
+    setAudioUploadError('')
+  }
+
+  // Only one audio source may exist: switching modes discards the other one.
+  const switchAudioMode = (mode: 'record' | 'upload') => {
+    if (mode === audioMode) return
+    if (recordState === 'recording') { clearInterval(timerRef.current!); mediaRecorderRef.current?.stop() }
+    resetRecording()
+    resetAudioUpload()
+    setRecordError('')
+    setAudioMode(mode)
+  }
+
+  const handleAudioFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('audio/')) {
+      setAudioUploadError('Only audio files are accepted (mp3, wav, m4a, etc.). Please try again.')
+      return
+    }
+    if (audioUploadUrl) URL.revokeObjectURL(audioUploadUrl)
+    setAudioUploadError('')
+    setAudioUploadFile(file)
+    setAudioUploadUrl(URL.createObjectURL(file))
   }
 
   useEffect(() => () => clearInterval(timerRef.current!), [])
@@ -599,6 +635,7 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
     formData.append('accident_location', location)
     formData.append('accident_description', description)
     formData.append('claim_amount', claimAmount)
+    if (incidentAt) formData.append('incident_datetime', incidentAt)
 
     if (videoFile) {
       formData.append('video', videoFile)
@@ -608,8 +645,10 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
       formData.append('image', imageFiles[0])
     }
 
-    // Real recorded audio statement, converted to WAV for vendor analysis
-    if (audioBlob) {
+    // Exactly one audio source: device file as-is, or live recording converted to WAV
+    if (audioMode === 'upload' && audioUploadFile) {
+      formData.append('audio', audioUploadFile)
+    } else if (audioBlob) {
       try {
         formData.append('audio', await blobToWavFile(audioBlob))
       } catch {
@@ -676,6 +715,13 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
               </select>
             </div>
             <FormInput label="Accident Location" placeholder="e.g. 47 Main St, Sydney NSW" value={location} onChange={setLocation} required />
+            <FormInput
+              label="When did it happen?"
+              value={incidentAt}
+              onChange={setIncidentAt}
+              type="datetime-local"
+              hint="Optional — date and time of the incident."
+            />
             <FormInput label="Description of incident" placeholder="Briefly describe what happened…" value={description} onChange={setDescription} multiline rows={4} required />
             <FormInput
               label="Claim Amount"
@@ -798,61 +844,135 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
           </>
         )}
 
-        {/* ── Step D: Voice Recording (mandatory) ── */}
+        {/* ── Step D: Voice Statement — record live or upload a file (mandatory) ── */}
         {step === 3 && (
           <>
             <div style={{ background: '#F9EEF1', border: '1px solid #E7C3CD', borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8 }}>
               <Mic size={14} color="#800020" style={{ flexShrink: 0, marginTop: 1 }} />
               <span style={{ fontSize: 11, color: '#4A0012', lineHeight: 1.5 }}>
-                <strong>Required:</strong> Record a voice statement describing the incident in your own words.
+                <strong>Required:</strong> Provide a voice statement describing the incident — record it live or upload an audio file from your device.
               </span>
             </div>
 
-            <div style={{ background: '#120B0D', borderRadius: 14, padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-              <div style={{ width: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#C76C82', letterSpacing: '0.1em' }}>VOICE ANALYSIS · LIVE</span>
-                  {recordState === 'recording' && <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#EF4444' }}>{fmt(recordSecs)}</span>}
-                  {recordState === 'done' && <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#10B981' }}>{fmt(recordSecs)} recorded</span>}
-                </div>
-                <WaveBars active={recordState === 'recording'} />
-              </div>
-
-              {/* Record / playback button */}
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {recordState === 'recording' && (
-                  <div className="ring-expand" style={{ position: 'absolute', width: 72, height: 72, borderRadius: '50%', border: '1.5px solid rgba(239,68,68,0.5)', pointerEvents: 'none' }} />
-                )}
-                <button
-                  onClick={recordState !== 'done' ? toggleRecord : undefined}
-                  style={{
-                    width: 68, height: 68, borderRadius: '50%', border: 'none', cursor: recordState === 'done' ? 'default' : 'pointer',
-                    background: recordState === 'done' ? 'linear-gradient(135deg,#059669,#10B981)' : recordState === 'recording' ? 'linear-gradient(135deg,#DC2626,#EF4444)' : 'linear-gradient(135deg,#6E1423,#800020)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  {recordState === 'done' ? <CheckCircle size={26} color="#fff" /> : recordState === 'recording' ? <div style={{ width: 20, height: 20, background: '#fff', borderRadius: 3 }} /> : <Mic size={26} color="#fff" />}
-                </button>
-              </div>
-
-              <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, textAlign: 'center' }}>
-                {recordState === 'idle' ? 'Tap to start recording' : recordState === 'recording' ? 'Recording — tap to stop' : 'Statement captured'}
-              </div>
+            {/* Source selector — only one option can be used */}
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8A8A', textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: 6 }}>Voice Statement Source</div>
+              <select
+                value={audioMode}
+                onChange={e => switchAudioMode(e.target.value as 'record' | 'upload')}
+                style={{
+                  width: '100%', padding: '12px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  border: '1px solid #E4E0E1', background: '#fff', color: '#121212',
+                  fontFamily: 'Inter,system-ui,sans-serif', outline: 'none', cursor: 'pointer',
+                }}
+              >
+                <option value="record">🎙 Record voice statement live</option>
+                <option value="upload">📂 Upload an audio file from device</option>
+              </select>
             </div>
 
-            {recordError && (
-              <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#B91C1C' }}>
-                {recordError}
-              </div>
+            {audioMode === 'record' && (
+              <>
+                <div style={{ background: '#120B0D', borderRadius: 14, padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                  <div style={{ width: '100%' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#C76C82', letterSpacing: '0.1em' }}>VOICE ANALYSIS · LIVE</span>
+                      {recordState === 'recording' && <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#EF4444' }}>{fmt(recordSecs)}</span>}
+                      {recordState === 'done' && <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#10B981' }}>{fmt(recordSecs)} recorded</span>}
+                    </div>
+                    <WaveBars active={recordState === 'recording'} />
+                  </div>
+
+                  {/* Record / playback button */}
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {recordState === 'recording' && (
+                      <div className="ring-expand" style={{ position: 'absolute', width: 72, height: 72, borderRadius: '50%', border: '1.5px solid rgba(239,68,68,0.5)', pointerEvents: 'none' }} />
+                    )}
+                    <button
+                      onClick={recordState !== 'done' ? toggleRecord : undefined}
+                      style={{
+                        width: 68, height: 68, borderRadius: '50%', border: 'none', cursor: recordState === 'done' ? 'default' : 'pointer',
+                        background: recordState === 'done' ? 'linear-gradient(135deg,#059669,#10B981)' : recordState === 'recording' ? 'linear-gradient(135deg,#DC2626,#EF4444)' : 'linear-gradient(135deg,#6E1423,#800020)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      {recordState === 'done' ? <CheckCircle size={26} color="#fff" /> : recordState === 'recording' ? <div style={{ width: 20, height: 20, background: '#fff', borderRadius: 3 }} /> : <Mic size={26} color="#fff" />}
+                    </button>
+                  </div>
+
+                  <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, textAlign: 'center' }}>
+                    {recordState === 'idle' ? 'Tap to start recording' : recordState === 'recording' ? 'Recording — tap to stop' : 'Statement captured'}
+                  </div>
+                </div>
+
+                {recordError && (
+                  <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#B91C1C' }}>
+                    {recordError}
+                  </div>
+                )}
+
+                {recordState === 'done' && (
+                  <div style={{ background: '#fff', border: '1px solid #E4E0E1', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {audioPlaybackUrl && <audio controls src={audioPlaybackUrl} style={{ width: '100%', height: 36 }} />}
+                    <button onClick={resetRecording} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#595959', fontSize: 12, alignSelf: 'flex-end' }}>
+                      <RotateCcw size={12} /> Re-record
+                    </button>
+                  </div>
+                )}
+              </>
             )}
 
-            {recordState === 'done' && (
-              <div style={{ background: '#fff', border: '1px solid #E4E0E1', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {audioPlaybackUrl && <audio controls src={audioPlaybackUrl} style={{ width: '100%', height: 36 }} />}
-                <button onClick={resetRecording} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#595959', fontSize: 12, alignSelf: 'flex-end' }}>
-                  <RotateCcw size={12} /> Re-record
-                </button>
-              </div>
+            {audioMode === 'upload' && (
+              <>
+                <input
+                  ref={audioFileInputRef}
+                  type="file"
+                  accept="audio/*"
+                  style={{ display: 'none' }}
+                  onChange={handleAudioFileSelect}
+                />
+                <div
+                  onClick={() => !audioUploadFile ? audioFileInputRef.current?.click() : undefined}
+                  style={{
+                    borderRadius: 14, border: `2px dashed ${audioUploadFile ? '#10B981' : audioUploadError ? '#EF4444' : '#E4E0E1'}`,
+                    background: audioUploadFile ? 'rgba(16,185,129,0.04)' : audioUploadError ? 'rgba(239,68,68,0.04)' : '#fff',
+                    padding: '24px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: audioUploadFile ? 'default' : 'pointer',
+                  }}
+                >
+                  {audioUploadFile ? (
+                    <>
+                      <CheckCircle size={28} color="#10B981" />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#10B981' }}>{audioUploadFile.name}</span>
+                      <span style={{ fontSize: 11, color: '#595959' }}>{(audioUploadFile.size / 1024 / 1024).toFixed(2)} MB</span>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ width: 44, height: 44, borderRadius: 12, background: '#FFFFFF', border: '1px solid #E4E0E1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Upload size={20} color="#595959" />
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#121212' }}>Tap to upload audio file</div>
+                        <div style={{ fontSize: 11, color: '#595959', marginTop: 3 }}>MP3, WAV, M4A, etc. · Your spoken statement</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {audioUploadError && (
+                  <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#B91C1C' }}>
+                    {audioUploadError}
+                  </div>
+                )}
+
+                {audioUploadFile && (
+                  <div style={{ background: '#fff', border: '1px solid #E4E0E1', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {audioUploadUrl && <audio controls src={audioUploadUrl} style={{ width: '100%', height: 36 }} />}
+                    <button onClick={() => { resetAudioUpload(); audioFileInputRef.current && (audioFileInputRef.current.value = '') }} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#595959', fontSize: 12, alignSelf: 'flex-end' }}>
+                      <RotateCcw size={12} /> Choose a different file
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -916,9 +1036,10 @@ function ClaimSubmission({ onSubmit, onBack }: { onSubmit: (claimDbId: number, c
               { label: 'Location', value: location },
               { label: 'Description', value: description },
               { label: 'Claim Amount', value: claimAmount ? `$${Number(claimAmount).toLocaleString()}` : '' },
+              { label: 'Incident Time', value: incidentAt ? new Date(incidentAt).toLocaleString() : 'Not provided' },
               { label: 'Video', value: videoUploadState === 'done' && videoFile ? `${videoFile.name} ✓` : 'None' },
               { label: 'Photos', value: imageUploadState === 'done' ? `${imageFiles.length} photo${imageFiles.length > 1 ? 's' : ''} ✓` : 'None' },
-              { label: 'Voice Statement', value: recordState === 'done' ? `${fmt(recordSecs)} recorded ✓` : 'None' },
+              { label: 'Voice Statement', value: audioMode === 'upload' ? (audioUploadFile ? `${audioUploadFile.name} ✓ (uploaded)` : 'None') : (recordState === 'done' ? `${fmt(recordSecs)} recorded ✓` : 'None') },
               { label: 'Supporting Doc', value: pdfState === 'done' ? pdfName : 'Skipped (optional)' },
             ].map(({ label, value }) => (
               <div key={label} style={{ background: '#fff', border: '1px solid #E4E0E1', borderRadius: 10, padding: '12px 14px' }}>

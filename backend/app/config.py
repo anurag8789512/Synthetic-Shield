@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     WEATHER_PROVIDER: str = "openweather"       # openweather | mock
     STT_PROVIDER: str = "faster_whisper"        # faster_whisper | mock | none
     SCORING_DEMO_MODE: int = 0                  # 1 = force all mock providers
+    RESUME_INTERRUPTED_CLAIMS: bool = True      # re-run claims left in "processing" at startup
     GPTZERO_API_KEY: str = ""
     PANGRAM_API_KEY: str = ""
     OPENWEATHER_API_KEY: str = ""

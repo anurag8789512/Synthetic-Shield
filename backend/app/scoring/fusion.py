@@ -62,7 +62,7 @@ def fuse(subscores: list[SubScore], config: ScoringConfig,
         source, s_max = max(candidates, key=lambda c: c[1])
         if s_max >= fusion_cfg.escalation_threshold:
             escalated = True
-            escalation_source = source.split(":")[0]
+            escalation_source = source  # e.g. "image" or "consistency:C-H3"
             final = max(base, s_max - fusion_cfg.escalation_discount)
     final = clamp(final)
 

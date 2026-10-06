@@ -8,6 +8,7 @@ import CaseFiles from './CaseFiles'
 import Reports from './Reports'
 import ClaimFlowchart from './ClaimFlowchart'
 import Efficiency from './Efficiency'
+import { timeAgo } from '../../data/time'
 
 type Tab = 'queue' | 'analytics' | 'cases' | 'reports' | 'lifecycle' | 'efficiency'
 
@@ -68,12 +69,9 @@ export default function Dashboard({ role = 'senior', onLogout }: { role?: string
           const statusText = c.status === 'siu_investigation' ? 'flagged for SIU' :
             c.status === 'moderator_review' ? 'sent to moderator review' :
             c.status === 'auto_approved' ? 'auto-approved' : c.status.replace(/_/g, ' ')
-          const created = c.created_at ? new Date(c.created_at) : new Date()
-          const mins = Math.floor((Date.now() - created.getTime()) / 60000)
-          const timeAgo = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`
           return {
             text: `${c.claim_number} ${statusText}${score ? ` — ${score.toFixed(0)}% risk` : ''}`,
-            time: timeAgo,
+            time: timeAgo(c.created_at),
             dot,
             claimId: c.id,
           }

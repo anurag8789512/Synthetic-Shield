@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.database import get_db
 from app.models import Claim, User, ModeratorAction, Payout, ClaimAssignment, ClaimsOfficer
-from app.config import settings
 from app.auth_deps import get_current_officer
 from app.agents.notification_agent import notify_claim_status
 from app.agents.audit_logger import log_event
+from app.agents.payouts import approved_payout_cents
 
 router = APIRouter(prefix="/claims", tags=["moderator"])
 
@@ -85,16 +85,17 @@ async def moderator_approve(
         mod_assignment.status = "completed"
         mod_assignment.completed_at = datetime.now(timezone.utc)
 
-    # Initiate payout
+    # Initiate payout: claimed amount, capped at the coverage limit
+    amount_cents = approved_payout_cents(claim, db)
     payout = Payout(
         claim_id=claim.id,
-        amount_cents=settings.MOCK_PAYOUT_AMOUNT_CENTS,
+        amount_cents=amount_cents,
         status="initiated",
         transaction_id=f"TXN-{claim.claim_number}-MOD",
         initiated_at=datetime.utcnow(),
     )
     db.add(payout)
-    claim.payout_amount_cents = settings.MOCK_PAYOUT_AMOUNT_CENTS
+    claim.payout_amount_cents = amount_cents
     claim.payout_transaction_id = payout.transaction_id
     db.commit()
 

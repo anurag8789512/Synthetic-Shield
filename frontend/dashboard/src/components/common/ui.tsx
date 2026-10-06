@@ -53,7 +53,20 @@ export function StatusPill({ status, size = 'sm' }: { status: StatusKey; size?: 
 }
 
 // ── RiskBadge ─────────────────────────────────────────────────────────────────
-export function RiskBadge({ score }: { score: number }) {
+export function RiskBadge({ score, pending }: { score: number; pending?: boolean }) {
+  if (pending) {
+    // score not generated yet — blinking dots instead of a misleading 0%
+    return (
+      <span title="Score is being formulated" style={{
+        fontSize: 11, fontWeight: 700, color: C.blue,
+        background: '#F9EEF1', border: '1px solid #E7C3CD',
+        borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap' as const,
+        fontFamily: 'monospace',
+      }}>
+        <span className="blink-dot">.</span><span className="blink-dot">.</span><span className="blink-dot">.</span>
+      </span>
+    )
+  }
   const color = score < 15 ? C.green : score <= 85 ? C.amber : C.red
   return (
     <span style={{

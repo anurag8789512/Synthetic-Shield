@@ -9,7 +9,8 @@ import json
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, event
-from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import ORMExecuteState, Session as DBSession
 
 from app.database import Base
 from app.scoring.models import Finding, ScoreBreakdown
@@ -66,9 +67,22 @@ def _forbid(mapper, connection, target):  # noqa: ARG001
     )
 
 
-for _model in (ClaimScore, ScoreFinding, EvidenceHash):
+_APPEND_ONLY = (ClaimScore, ScoreFinding, EvidenceHash)
+
+for _model in _APPEND_ONLY:
     event.listen(_model, "before_update", _forbid)
     event.listen(_model, "before_delete", _forbid)
+
+
+@event.listens_for(DBSession, "do_orm_execute")
+def _forbid_bulk(state: ORMExecuteState):
+    """Also block bulk query().update()/delete() and update()/delete() statements,
+    which skip the per-row mapper events above."""
+    if (state.is_update or state.is_delete) and state.bind_mapper is not None \
+            and state.bind_mapper.class_ in _APPEND_ONLY:
+        raise AppendOnlyViolation(
+            f"{state.bind_mapper.class_.__name__} rows are append-only; bulk UPDATE/DELETE is forbidden"
+        )
 
 
 def next_version(db: DBSession, claim_id: str) -> int:
@@ -81,7 +95,21 @@ def next_version(db: DBSession, claim_id: str) -> int:
     return (latest[0] + 1) if latest else 1
 
 
-def save_breakdown(db: DBSession, breakdown: ScoreBreakdown) -> ClaimScore:
+def save_breakdown(db: DBSession, breakdown: ScoreBreakdown, _attempts: int = 3) -> ClaimScore:
+    """Insert a new score version. If a concurrent re-score took the same version
+    number (unique constraint), re-read the next free version and retry."""
+    for attempt in range(_attempts):
+        try:
+            return _insert_breakdown(db, breakdown)
+        except IntegrityError:
+            db.rollback()
+            if attempt == _attempts - 1:
+                raise
+            breakdown = breakdown.model_copy(update={"version": next_version(db, breakdown.claim_id)})
+    raise RuntimeError("unreachable")
+
+
+def _insert_breakdown(db: DBSession, breakdown: ScoreBreakdown) -> ClaimScore:
     row = ClaimScore(
         claim_id=str(breakdown.claim_id),
         version=breakdown.version,
@@ -115,6 +143,14 @@ def save_breakdown(db: DBSession, breakdown: ScoreBreakdown) -> ClaimScore:
 
 def record_evidence_hash(db: DBSession, claim_id: str, file_id: str,
                          sha256: str, phash: str | None, media_type: str) -> None:
+    exists = (
+        db.query(EvidenceHash.id)
+        .filter(EvidenceHash.claim_id == str(claim_id), EvidenceHash.file_id == file_id,
+                EvidenceHash.sha256 == sha256)
+        .first()
+    )
+    if exists:  # re-score of the same file — already indexed
+        return
     db.add(EvidenceHash(claim_id=str(claim_id), file_id=file_id, sha256=sha256,
                         phash=phash, media_type=media_type))
     db.commit()

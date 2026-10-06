@@ -37,13 +37,12 @@ def _get_officer_workload(officer_id: int, db: DBSession) -> dict:
 
 
 def assign_siu_officers(claim_id: int, db: DBSession) -> list[int]:
-    """Assign 5 SIU officers to a claim, least total-pending first."""
+    """Assign up to 5 SIU-eligible officers to a claim, least total-pending first.
+    Moderators are never put on an SIU panel; with fewer than 5 eligible officers
+    the panel is smaller and the majority threshold adapts (siu.py::_majority)."""
     siu_officers = db.query(ClaimsOfficer).filter(
         ClaimsOfficer.role.in_(["siu_officer", "senior"]),
     ).all()
-
-    if len(siu_officers) < 5:
-        siu_officers = db.query(ClaimsOfficer).all()
 
     # Rank by total pending work (not just SIU, all assignment types)
     officer_loads = [(o, _get_officer_workload(o.id, db)["pending"]) for o in siu_officers]

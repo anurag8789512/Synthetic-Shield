@@ -1,14 +1,16 @@
 # SyntheticShield Fraud Fusion Scoring — design-stage defaults (pending calibration).
 # Every weight/penalty/threshold used by app/scoring lives here. Do NOT hard-code elsewhere.
-config_version: "0.1.0-design"
+config_version: "0.2.0-design"
 
 fusion:
+  # 0.1.1: metadata cut 0.10 → 0.02 (weak/benign signal); the freed 0.08 spread
+  # roughly pro-rata over image/video/audio/consistency.
   weights:
-    image: 0.22
-    video: 0.22
-    audio: 0.18
-    consistency: 0.20
-    metadata: 0.10
+    image: 0.24
+    video: 0.24
+    audio: 0.20
+    consistency: 0.22
+    metadata: 0.02
     text: 0.08
   escalation_threshold: 90
   escalation_discount: 5
@@ -31,11 +33,29 @@ metadata:
   modify_gap_hours: 1
 
 image_pixel:
-  component_weights:
-    ela: 0.20
-    jpeg_dq: 0.35
-    noise: 0.25
-    freq: 0.20
+  # S_image = max(editing, synthesis). Editing = localized manipulation of a real
+  # photo; synthesis = fully AI-generated / AI-upscaled imagery.
+  component_weights:      # editing group
+    ela: 0.25
+    jpeg_dq: 0.45
+    noise: 0.30
+  synthesis_weights:
+    texture: 0.60         # micro-texture in flat regions (generator "detail")
+    clipping: 0.25        # % pixels crushed to black/white (generative tone mapping)
+    saturation: 0.15      # mean HSV saturation
+  # Synthesis ramps, measured at 1280 px long side. Calibrated 2026-10-06 on the
+  # matched real/AI pair in Tests/ (image + video frames, incl. JPEG/resize re-saves):
+  # texture real 0.52-0.65 vs AI 1.46-2.1 · clipped % 0.06-0.17 vs 2.6-3.7 ·
+  # saturation 65 vs 76-85. One scene only — recalibrate on a labeled set.
+  texture:
+    lo: 0.8
+    hi: 1.4
+  clipping:
+    lo: 1.0
+    hi: 2.5
+  saturation:
+    lo: 70
+    hi: 80
   ela:
     r0: 2.0
     r1: 8.0
@@ -46,9 +66,6 @@ image_pixel:
   noise:
     n0: 4.0
     n1: 12.0
-  freq:
-    f0: 0.15
-    f1: 0.45
 
 video_pixel:
   fps_sample: 1

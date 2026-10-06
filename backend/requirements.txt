@@ -19,3 +19,4 @@ pypdf
 imagehash
 pyyaml
 faster-whisper
+c2pa-python

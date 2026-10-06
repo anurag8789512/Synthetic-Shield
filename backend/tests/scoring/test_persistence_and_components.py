@@ -1,6 +1,8 @@
 """§10.9 append-only persistence + §10.12 image component gating + provider
 direction constants + text cross-check rule.
 """
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -62,7 +64,48 @@ def test_png_skips_jpeg_dq(tmp_path):
     sub = ImagePixelAnalyzer(CFG).analyze(png_path)
     assert sub.status == "ok"
     assert "jpeg_dq" not in sub.components
-    assert set(sub.components) <= {"ela", "noise", "freq"}
+    assert set(sub.components) <= {"ela", "noise", "texture", "clipping", "saturation",
+                                   "editing", "synthesis"}
+
+
+# ── Synthesis group: real vs AI pair (Tests/ media, skipped when absent) ─────
+TESTS_DIR = Path(__file__).resolve().parents[3] / "Tests"
+
+
+@pytest.mark.skipif(not (TESTS_DIR / "car_accident_dupe.png").exists(), reason="Tests/ media not present")
+def test_synthesis_separates_real_and_ai_photo():
+    from app.scoring.level2_manipulation.image_pixel import ImagePixelAnalyzer
+    real = ImagePixelAnalyzer(CFG).analyze(TESTS_DIR / "car_accident_clean.jpg")
+    ai = ImagePixelAnalyzer(CFG).analyze(TESTS_DIR / "car_accident_dupe.png")
+    assert real.value < 15
+    assert ai.value >= 90 and ai.components["synthesis"] >= 90
+
+
+def test_c2pa_ai_declaration_forces_synthesis(tmp_path, monkeypatch):
+    from app.scoring.level2_manipulation import image_pixel
+    from app.scoring.provenance import C2PAInfo
+    arr = np.full((128, 128, 3), 120, dtype=np.uint8)
+    jpg_path = tmp_path / "gen.jpg"
+    Image.fromarray(arr).save(jpg_path, quality=90)
+    monkeypatch.setattr(image_pixel, "read_c2pa", lambda p: C2PAInfo(
+        ai_generated=True, valid=False, generator="DALL-E", validation_errors=()))
+    sub = image_pixel.ImagePixelAnalyzer(CFG).analyze(jpg_path)
+    assert sub.value == 100.0
+    assert any(f.rule_id == "I-C2PA-AI" for f in sub.findings)
+
+
+def test_c2pa_metadata_rule_credit_only_when_trusted(monkeypatch):
+    from app.scoring.level1_metadata import exif_rules
+    from app.scoring.provenance import C2PAInfo
+    for info, expected in [
+        (C2PAInfo(ai_generated=True, valid=True, generator="x", validation_errors=()), "M-H6"),
+        (C2PAInfo(ai_generated=False, valid=True, generator="x", validation_errors=()), "M-C1"),
+        (C2PAInfo(ai_generated=False, valid=False, generator="x",
+                  validation_errors=("signingCredential.untrusted",)), None),
+    ]:
+        monkeypatch.setattr(exif_rules, "read_c2pa", lambda p, i=info: i)
+        f = exif_rules.rule_m_c1_c2pa("x.jpg", CFG.metadata, "x.jpg")
+        assert (f.rule_id if f else None) == expected
 
 
 def test_jpeg_includes_dq_component(tmp_path):

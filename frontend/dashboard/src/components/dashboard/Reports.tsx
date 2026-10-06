@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Download, FileText, ChevronDown } from 'lucide-react'
 import { StatusPill, SectionHeading, C } from '../common/ui'
 import { fetchAllClaims, getReportPdfUrl } from '../../data/api'
+import { serverDate } from '../../data/time'
 import { parseScoreBreakdown, type ScoreBreakdown } from '../../data/types'
 import { ScoreBreakdownPanel } from './ScoreBreakdownPanel'
 
@@ -54,7 +55,7 @@ export default function Reports() {
                 claimId: c.id,
                 claimNumber: c.claim_number,
                 claimant: c.claimant_name || 'Unknown',
-                date: c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+                date: c.created_at ? serverDate(c.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
                 status: c.status === 'processing' ? 'Draft' : 'Final',
                 score: Math.round(c.fraud_confidence_score ?? 0),
                 summary,

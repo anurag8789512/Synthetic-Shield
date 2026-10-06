@@ -28,6 +28,15 @@ engine = create_engine(
 )
 TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Background pipeline work must hit the test DB too — never the real claims.db
+# (it previously re-ran real claim #1 on every test run) — and startup must not
+# resume real interrupted claims.
+from app.agents import pipeline_runner  # noqa: E402
+from app.config import settings  # noqa: E402
+
+pipeline_runner.session_factory = TestingSession
+settings.RESUME_INTERRUPTED_CLAIMS = False
+
 
 @pytest.fixture(scope="function")
 def db():

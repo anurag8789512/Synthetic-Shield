@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { C, SectionHeading } from '../common/ui'
 import { fetchAllClaims } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null
@@ -61,7 +62,7 @@ export default function Analytics() {
       d.setDate(d.getDate() - i)
       const key = d.toDateString()
       const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      const dayClaims = claims.filter(c => c.created_at && new Date(c.created_at).toDateString() === key)
+      const dayClaims = claims.filter(c => c.created_at && serverDate(c.created_at).toDateString() === key)
       days.push({
         date: label,
         total: dayClaims.length,

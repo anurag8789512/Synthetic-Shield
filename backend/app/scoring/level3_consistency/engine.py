@@ -50,6 +50,12 @@ class ConsistencyEngine:
                       run_external_search: bool) -> SubScore:
         cfg = self.config.consistency
         findings: list[Finding] = []
+        if not (transcript or "").strip() and not (written_description or "").strip() \
+                and not photo_zone and not media_datetime_originals:
+            sub = SubScore(name="consistency", status="not_applicable",
+                           provider="in_house_consistency_v1")
+            sub.components["payout_cap"] = -1.0
+            return sub
 
         voice_facts = fx.extract_facts(transcript, "voice", incident_dt, location)
         written_facts = fx.extract_facts(written_description, "written", incident_dt, location)

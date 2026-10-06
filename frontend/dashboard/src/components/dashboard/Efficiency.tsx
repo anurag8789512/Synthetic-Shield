@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { Users, BarChart3, CheckCircle, Clock, TrendingUp, ChevronDown, ArrowRightLeft } from 'lucide-react'
 import { C } from '../common/ui'
 import { fetchOfficers, fetchWorkloadSummary, fetchOfficerAssignments, reassignAssignment } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 interface OfficerStats {
   id: number
@@ -269,7 +270,7 @@ export default function Efficiency() {
                                 <div style={{ width: 130 }}>
                                   <div style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: C.text }}>{a.claim_number}</div>
                                   <div style={{ fontSize: 9, color: C.mutedLight, marginTop: 2 }}>
-                                    Assigned {a.assigned_at ? new Date(a.assigned_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—'}
+                                    Assigned {a.assigned_at ? serverDate(a.assigned_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—'}
                                   </div>
                                 </div>
                                 <div style={{ width: 120 }}>

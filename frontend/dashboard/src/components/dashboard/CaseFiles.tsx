@@ -8,6 +8,7 @@ import { StatusPill, RiskBadge, SectionHeading, Divider, C } from '../common/ui'
 import { fetchAllClaims, getDownloadCaseUrl, getForensicAuditUrl } from '../../data/api'
 import { parseScoreBreakdown, type ScoreBreakdown } from '../../data/types'
 import { ScoreBreakdownPanel } from './ScoreBreakdownPanel'
+import { serverDate } from '../../data/time'
 
 interface CaseFile {
   id: string
@@ -54,7 +55,7 @@ function statusKeyOf(status: string, decidedBy: string | null): CaseFile['status
 
 function fmtDate(iso?: string) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  return serverDate(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function fmtMoney(cents?: number) {
@@ -73,7 +74,7 @@ function claimToCase(c: any): CaseFile {
 
   const firstDoc = c.documents?.[0]
   const auditTrail = (c.audit_trail || []).map((e: any) => ({
-    time: e.created_at ? new Date(e.created_at).toLocaleString() : '',
+    time: e.created_at ? serverDate(e.created_at).toLocaleString() : '',
     event: (e.action || '').replace(/_/g, ' ').replace(/^./, (ch: string) => ch.toUpperCase()),
   })).reverse()
 

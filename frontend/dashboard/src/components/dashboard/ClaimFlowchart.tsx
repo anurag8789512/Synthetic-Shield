@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { CheckCircle, AlertTriangle, Shield, Clock, FileText, Send, XCircle, Loader, Download } from 'lucide-react'
 import { C } from '../common/ui'
 import { fetchAllClaims, getReportPdfUrl } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 const ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
   claim_received: { icon: FileText, color: '#800020', label: 'Claim Submitted' },
@@ -47,7 +48,8 @@ export default function ClaimFlowchart() {
       if (Array.isArray(data)) {
         const withTrail = data.filter((c: any) => c.audit_trail && c.audit_trail.length > 0)
         setClaims(withTrail)
-        if (withTrail.length > 0 && !selected) setSelected(withTrail[0].claim_number)
+        // functional update: this closure is created once, so `selected` here is stale
+        if (withTrail.length > 0) setSelected(prev => prev ?? withTrail[0].claim_number)
       }
       setLoading(false)
     }
@@ -168,7 +170,7 @@ export default function ClaimFlowchart() {
                         <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{config.label}</div>
                         {step.created_at && (
                           <div style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace' }}>
-                            {new Date(step.created_at).toLocaleTimeString()}
+                            {serverDate(step.created_at).toLocaleTimeString()}
                           </div>
                         )}
                       </div>

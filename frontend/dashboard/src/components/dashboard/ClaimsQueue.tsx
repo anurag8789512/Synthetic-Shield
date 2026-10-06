@@ -10,18 +10,17 @@ import {
 } from '../../data/api'
 import { StatusPill, RiskBadge, SectionHeading, Btn, C } from '../common/ui'
 import { ScoreBreakdownPanel } from './ScoreBreakdownPanel'
+import { serverDate, timeAgo } from '../../data/time'
 
 function apiClaimToLocal(c: any): Claim {
   const score = c.fraud_confidence_score ?? 0
   const findings = c.analyses?.flatMap((a: any) => {
     try { const d = JSON.parse(a.findings_json); return d.findings?.map((f: any) => f.detail) || [] } catch { return [] }
   }) || []
-  const created = c.created_at ? new Date(c.created_at) : new Date()
-  const diffMin = Math.floor((Date.now() - created.getTime()) / 60000)
-  const timeAgo = diffMin < 60 ? `${diffMin}m ago` : `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`
+  const submittedAgo = timeAgo(c.created_at)
 
   const auditTrail = (c.audit_trail || []).map((e: any) => ({
-    time: e.created_at ? new Date(e.created_at).toLocaleTimeString() : '',
+    time: e.created_at ? serverDate(e.created_at).toLocaleTimeString() : '',
     event: (e.action || '').replace(/_/g, ' ').replace(/^./, (ch: string) => ch.toUpperCase()),
   })).reverse()
 
@@ -45,7 +44,8 @@ function apiClaimToLocal(c: any): Claim {
     name: c.claimant_name || 'Unknown',
     score,
     status: scoreToStatus(score),
-    time: timeAgo,
+    time: submittedAgo,
+    submittedAt: c.created_at || undefined,
     isLive: c.status === 'processing',
     incidentType: 'Motor Claim',
     location: c.accident_location || '',
@@ -110,6 +110,27 @@ function useLiveClaims() {
   }, [])
 
   return { liveClaims, loaded }
+}
+
+// ── Score pending: live timer while the backend analyzes the evidence ─────────
+function FormulatingGauge({ since }: { since?: string }) {
+  const start = since ? serverDate(since).getTime() : Date.now()
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const secs = Math.max(0, Math.floor((now - start) / 1000))
+  const elapsed = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 0' }}>
+      <div style={{ fontSize: 30, fontWeight: 800, color: C.blue, fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.04em' }}>{elapsed}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.blue }}>
+        Formulating<span className="blink-dot">.</span><span className="blink-dot">.</span><span className="blink-dot">.</span>
+      </div>
+      <div style={{ fontSize: 10, color: C.muted }}>Analyzing evidence — fraud score will appear here</div>
+    </div>
+  )
 }
 
 // ── Radial gauge ──────────────────────────────────────────────────────────────
@@ -301,8 +322,10 @@ function SIUVoting({ claim }: { claim: Claim }) {
   return (
     <div>
       <div style={{ background: '#FFF5F5', border: `1px solid #FECACA`, borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: C.red }}>SIU Quorum Required</span>
-        <span style={{ fontSize: 11, color: C.muted }}>{siuStatus?.votes_cast ?? 0} of {siuStatus?.required_votes ?? officers.length} votes cast</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: C.red }}>SIU Vote</span>
+        <span style={{ fontSize: 11, color: C.muted }}>
+          {siuStatus?.fraud_votes ?? 0} Fraud · {siuStatus?.clear_votes ?? 0} Clear · {siuStatus?.votes_cast ?? 0}/{siuStatus?.required_votes ?? officers.length} cast
+        </span>
       </div>
       {error && (
         <div style={{ background: '#FFF5F5', border: '1px solid #FECACA', borderRadius: 7, padding: '6px 10px', marginBottom: 8, fontSize: 10, color: C.red }}>{error}</div>
@@ -539,7 +562,7 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
                     <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{c.name}</div>
                     <div style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace', marginTop: 1 }}>{c.id}</div>
                   </div>
-                  <RiskBadge score={c.score} />
+                  <RiskBadge score={c.score} pending={c.isLive} />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -589,7 +612,11 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
               )}
               <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.55)', borderRadius: 6, padding: '4px 8px', textAlign: 'center', pointerEvents: 'none' }}>
                 <div style={{ fontSize: 7, color: 'rgba(255,255,255,0.5)' }}>RISK</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: claim.score > 85 ? C.red : claim.score >= 15 ? C.amber : C.green, fontFamily: 'monospace' }}>{claim.score}%</div>
+                {claim.isLive
+                  ? <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', fontFamily: 'monospace' }}>
+                      <span className="blink-dot">.</span><span className="blink-dot">.</span><span className="blink-dot">.</span>
+                    </div>
+                  : <div style={{ fontSize: 16, fontWeight: 800, color: claim.score > 85 ? C.red : claim.score >= 15 ? C.amber : C.green, fontFamily: 'monospace' }}>{claim.score}%</div>}
               </div>
             </div>
           )}
@@ -664,9 +691,15 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
           {rightSection === 'analysis' && (
             <>
               {/* Gauge */}
-              <div style={{ background: claim.score > 85 ? '#FFF5F5' : claim.score >= 15 ? '#FFFBEB' : '#F0FDF4', border: `1px solid ${claim.score > 85 ? '#FECACA' : claim.score >= 15 ? '#FDE68A' : '#BBF7D0'}`, borderRadius: 10, padding: '14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <FraudGauge score={claim.score} />
-              </div>
+              {claim.isLive ? (
+                <div style={{ background: '#F9EEF1', border: '1px solid #E7C3CD', borderRadius: 10, padding: '14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <FormulatingGauge key={claim.id} since={claim.submittedAt} />
+                </div>
+              ) : (
+                <div style={{ background: claim.score > 85 ? '#FFF5F5' : claim.score >= 15 ? '#FFFBEB' : '#F0FDF4', border: `1px solid ${claim.score > 85 ? '#FECACA' : claim.score >= 15 ? '#FDE68A' : '#BBF7D0'}`, borderRadius: 10, padding: '14px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <FraudGauge score={claim.score} />
+                </div>
+              )}
 
               {/* Per-level score division — shown for every claim, fraud or not */}
               {claim.scoreBreakdown && <ScoreBreakdownPanel breakdown={claim.scoreBreakdown} />}
@@ -674,7 +707,9 @@ export default function ClaimsQueue({ headerSearch }: { headerSearch: string }) 
               {/* AI Findings */}
               <div>
                 <SectionHeading>AI Findings</SectionHeading>
-                {claim.findings.length === 0
+                {claim.isLive
+                  ? <div style={{ fontSize: 11, color: C.muted, background: '#F9EEF1', border: '1px solid #E7C3CD', borderRadius: 8, padding: '10px 12px' }}>Findings will appear once the evidence analysis completes.</div>
+                  : claim.findings.length === 0
                   ? <div style={{ fontSize: 11, color: C.muted, background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '10px 12px' }}>No anomalies detected — all signals within normal parameters.</div>
                   : claim.findings.map((f, i) => (
                     <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', background: '#FFF5F5', border: '1px solid #FECACA', borderRadius: 7, marginBottom: 6 }}>

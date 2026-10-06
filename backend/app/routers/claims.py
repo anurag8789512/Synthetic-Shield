@@ -1,12 +1,12 @@
-import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func
 
-from app.database import get_db, SessionLocal
+from app.database import get_db
+from app.agents.pipeline_runner import start_pipeline
 from app.models import (
     User, Claim, Coverage, Policy, ClaimDocument, ClaimMediaAnalysis, AuditTrail,
     ClaimsOfficer, ModeratorAction,
@@ -69,9 +69,6 @@ def _decision_fields(claim: Claim, mod_action: ModeratorAction | None) -> dict:
         "queue_action": queue_action,
     }
 
-# Strong reference set to prevent background tasks from being GC'd
-_background_tasks: set = set()
-
 
 def _generate_claim_number(db: DBSession) -> str:
     year = datetime.utcnow().year
@@ -85,6 +82,7 @@ async def submit_claim(
     accident_location: str = Form(...),
     accident_description: str = Form(...),
     claim_amount: float = Form(...),
+    incident_datetime: Optional[str] = Form(None),
     video: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     audio: UploadFile = File(...),
@@ -103,6 +101,16 @@ async def submit_claim(
 
     if claim_amount <= 0:
         raise HTTPException(status_code=400, detail="Claim amount must be greater than zero.")
+
+    # Optional incident date/time (ISO, e.g. "2026-10-05T14:30" from <input type=datetime-local>)
+    incident_at = None
+    if incident_datetime and incident_datetime.strip():
+        try:
+            incident_at = datetime.fromisoformat(incident_datetime.strip()).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid incident date/time.")
+        if incident_at > datetime.now() + timedelta(minutes=5):
+            raise HTTPException(status_code=400, detail="Incident date/time cannot be in the future.")
 
     # At least one visual evidence is required
     has_video = video and video.filename
@@ -142,6 +150,7 @@ async def submit_claim(
         coverage_id=coverage_id,
         accident_location=accident_location,
         accident_description=accident_description,
+        incident_at=incident_at,
         video_url=video_url,
         image_url=image_url,
         audio_url=audio_url,
@@ -165,20 +174,8 @@ async def submit_claim(
     db.commit()
     db.refresh(claim)
 
-    # Kick off full pipeline in background (strong ref to prevent GC)
-    async def _process_claim(claim_id: int):
-        from app.agents.orchestrator import process_claim
-        detection_db = SessionLocal()
-        try:
-            await process_claim(claim_id, detection_db)
-        except Exception as e:
-            print(f"[PIPELINE ERROR] Claim {claim_id}: {e}")
-        finally:
-            detection_db.close()
-
-    task = asyncio.create_task(_process_claim(claim.id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    # Kick off the full pipeline in the background (failures route to moderator review)
+    start_pipeline(claim.id, claim_number, video.filename if has_video else None)
 
     return {
         "claim_id": claim.id,
