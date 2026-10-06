@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { C, SectionHeading } from '../common/ui'
 import { fetchAllClaims } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null
@@ -61,7 +62,7 @@ export default function Analytics() {
       d.setDate(d.getDate() - i)
       const key = d.toDateString()
       const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      const dayClaims = claims.filter(c => c.created_at && new Date(c.created_at).toDateString() === key)
+      const dayClaims = claims.filter(c => c.created_at && serverDate(c.created_at).toDateString() === key)
       days.push({
         date: label,
         total: dayClaims.length,
@@ -76,7 +77,7 @@ export default function Analytics() {
     { name: 'Auto-Approved', value: claims.filter(c => ['auto_approved'].includes(c.status)).length, color: '#10B981' },
     { name: 'Manual Review', value: claims.filter(c => ['moderator_review', 'rejected'].includes(c.status)).length, color: '#F59E0B' },
     { name: 'SIU Investigation', value: claims.filter(c => ['siu_investigation', 'siu_confirmed_fraud', 'siu_cleared'].includes(c.status)).length, color: '#EF4444' },
-    { name: 'Processing', value: claims.filter(c => c.status === 'processing').length, color: '#94A3B8' },
+    { name: 'Processing', value: claims.filter(c => c.status === 'processing').length, color: '#8A8A8A' },
   ].filter(d => d.value > 0)
 
   // ── Signal breakdown (per-modality anomalies, score > 50) ──
@@ -137,7 +138,7 @@ export default function Analytics() {
                   <stop offset="95%" stopColor={C.red} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#F3F0F1" vertical={false} />
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: C.mutedLight }} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: C.mutedLight }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
@@ -193,10 +194,10 @@ export default function Analytics() {
         ) : (
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={signalBreakdown} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#F3F0F1" vertical={false} />
               <XAxis dataKey="type" tick={{ fontSize: 11, fill: C.mutedLight }} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: C.mutedLight }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: '#F8FAFC' }} />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: '#FFFFFF' }} />
               <Bar dataKey="count" name="Claims Flagged" radius={[4, 4, 0, 0]}>
                 {signalBreakdown.map((_, i) => (
                   <Cell key={i} fill={[C.red, C.amber, C.primary, C.muted][i % 4]} />

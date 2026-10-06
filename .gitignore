@@ -28,3 +28,6 @@ backend/app/chroma_store/
 # OS junk
 .DS_Store
 Thumbs.db
+# Demo recordings: keep only the final stitched videos
+demo/videos/*
+!demo/videos/SyntheticShield-*.mp4

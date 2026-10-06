@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from app.scoring.config import MetadataConfig
 from app.scoring.models import Finding
+from app.scoring.provenance import read_c2pa
 
 KNOWN_EDITORS = ["photoshop", "gimp", "lightroom", "snapseed", "canva", "pixelmator", "affinity"]
 
@@ -41,6 +42,26 @@ def parse_exif_dt(value: str | None) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+# EXIF DateTimeOriginal is camera-local time with no zone. Without an offset we
+# can't convert to UTC, so comparisons against UTC allow the widest real offset.
+MAX_TZ_OFFSET = timedelta(hours=14)
+SAME_ZONE_SLACK = timedelta(minutes=5)
+
+
+def capture_dt_utc(meta: dict) -> tuple[datetime | None, timedelta]:
+    """(capture time as naive UTC where knowable, comparison slack)."""
+    dt = parse_exif_dt(meta.get("datetime_original"))
+    if not dt:
+        return None, SAME_ZONE_SLACK
+    if meta.get("datetime_is_utc"):
+        return dt, SAME_ZONE_SLACK
+    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", str(meta.get("offset_time_original") or "").strip())
+    if m:
+        offset = timedelta(hours=int(m.group(2)), minutes=int(m.group(3)))
+        return (dt - offset if m.group(1) == "+" else dt + offset), SAME_ZONE_SLACK
+    return dt, MAX_TZ_OFFSET
 
 
 def rule_m_h1_editor_trace(meta: dict, cfg: MetadataConfig, file_id: str) -> Finding | None:
@@ -81,16 +102,16 @@ def rule_m_h3_impossible_timestamp(meta: dict, cfg: MetadataConfig, file_id: str
                                    submission_dt: datetime | None,
                                    policy_start: datetime | None) -> Finding | None:
     """M-H3: DateTimeOriginal in the future / after submission / before policy start."""
-    dt_orig = parse_exif_dt(meta.get("datetime_original"))
+    dt_orig, slack = capture_dt_utc(meta)
     if not dt_orig:
         return None
     now = datetime.utcnow()
     reasons = []
-    if dt_orig > now + timedelta(minutes=5):
+    if dt_orig > now + slack:
         reasons.append("is in the future")
-    if submission_dt and dt_orig > submission_dt + timedelta(minutes=5):
+    if submission_dt and dt_orig > submission_dt + slack:
         reasons.append("post-dates the claim submission")
-    if policy_start and dt_orig < policy_start:
+    if policy_start and dt_orig < policy_start - MAX_TZ_OFFSET:
         reasons.append("pre-dates the policy start")
     if reasons:
         return Finding(
@@ -221,11 +242,11 @@ def rule_m_c2_intact_exif(meta: dict, cfg: MetadataConfig, file_id: str,
                           claimed_latlon: tuple[float, float] | None,
                           submission_dt: datetime | None) -> Finding | None:
     """M-C2 credit: intact camera EXIF all consistent with claim time/place."""
-    dt_orig = parse_exif_dt(meta.get("datetime_original"))
+    dt_orig, slack = capture_dt_utc(meta)
     gps = meta.get("gps")
     if not (meta.get("make") and meta.get("model") and dt_orig and gps):
         return None
-    if submission_dt and dt_orig > submission_dt:
+    if submission_dt and dt_orig > submission_dt + slack:
         return None
     if claimed_latlon:
         dist = _haversine_km(gps[0], gps[1], claimed_latlon[0], claimed_latlon[1])
@@ -241,19 +262,24 @@ def rule_m_c2_intact_exif(meta: dict, cfg: MetadataConfig, file_id: str,
 
 
 def rule_m_c1_c2pa(file_path: str, cfg: MetadataConfig, file_id: str) -> Finding | None:
-    """M-C1 credit: valid C2PA manifest. Skipped when c2pa-python is unavailable."""
-    try:
-        import c2pa  # type: ignore
-    except ImportError:
+    """C2PA content credentials:
+    M-H6 (high): the manifest declares AI generation (IPTC trainedAlgorithmicMedia);
+    M-C1 (credit): a fully valid manifest from a trusted signer, not AI-declared.
+    Untrusted or invalid manifests earn nothing, since anyone can self-sign one."""
+    info = read_c2pa(file_path)
+    if info is None:
         return None
-    try:
-        reader = c2pa.Reader.from_file(file_path)
-        manifest = reader.json()
-        if manifest:
-            return Finding(
-                rule_id="M-C1", severity="credit", points=cfg.credits.c2pa, file_id=file_id,
-                human_readable=f"File {file_id} carries a valid C2PA provenance manifest.",
-            )
-    except Exception:
-        return None
+    if info.ai_generated:
+        return Finding(
+            rule_id="M-H6", severity="high", points=cfg.high, file_id=file_id,
+            human_readable=(f"File {file_id} carries C2PA content credentials declaring it AI-generated"
+                            + (f" ({info.generator})." if info.generator else ".")),
+            extra={"generator": info.generator},
+        )
+    if info.valid:
+        return Finding(
+            rule_id="M-C1", severity="credit", points=cfg.credits.c2pa, file_id=file_id,
+            human_readable=f"File {file_id} carries a valid, trusted C2PA provenance manifest.",
+            extra={"generator": info.generator},
+        )
     return None

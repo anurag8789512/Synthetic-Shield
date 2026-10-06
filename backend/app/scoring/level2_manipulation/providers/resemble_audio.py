@@ -43,8 +43,7 @@ class ResembleAudioProvider(DetectorProvider):
             scores = metrics.get("score") or []
             raw = float(scores[0]) if scores else (0.95 if label == "fake" else 0.05)
         raw = min(max(raw, 0.0), 1.0)
-        if not self.SCORE_IS_FAKE_PROBABILITY:
-            raw = 1.0 - raw
+        # direction (SCORE_IS_FAKE_PROBABILITY) is applied once, by the orchestrator
         return ProviderResult(
             raw_score=raw, label=label or ("fake" if raw > 0.5 else "real"),
             latency_ms=(time.monotonic() - start) * 1000,

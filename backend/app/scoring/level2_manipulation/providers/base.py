@@ -8,6 +8,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -59,8 +60,10 @@ async def call_with_retries(coro_factory, retries: int, timeout_s: float,
 class MockDetectorProvider(DetectorProvider):
     """Deterministic canned responses for tests and demo mode.
 
-    Filename/text containing fraud|fake|synthetic → high fake probability;
-    clean|real|genuine → low; otherwise seeded from content hash.
+    Filename containing the whole word fraud|fake|synthetic → high fake
+    probability; clean|real|genuine → low; otherwise seeded from the content hash
+    in [0, 0.6) so an untriggered mock can never escalate a claim on its own.
+    Claimant text is never keyword-matched (a statement saying "fake" isn't fake).
     """
     SCORE_IS_FAKE_PROBABILITY = True
 
@@ -68,14 +71,18 @@ class MockDetectorProvider(DetectorProvider):
         self.provider_name = provider_name
 
     async def detect(self, filename: str, content: bytes) -> ProviderResult:
-        key = (filename + content[:64].decode("utf-8", "ignore")).lower()
-        if any(w in key for w in ("fraud", "fake", "synthetic")):
+        key = filename.lower()
+
+        def hit(words):
+            return any(re.search(rf"(?<![a-z]){w}(?![a-z])", key) for w in words)
+
+        if hit(("fraud", "fake", "synthetic")):
             score = 0.93
-        elif any(w in key for w in ("clean", "real", "genuine")):
+        elif hit(("clean", "real", "genuine")):
             score = 0.05
         else:
             digest = hashlib.md5(filename.encode() + content[:256]).hexdigest()
-            score = (int(digest[:8], 16) % 1000) / 1000.0
+            score = (int(digest[:8], 16) % 600) / 1000.0
         return ProviderResult(raw_score=score, label="fake" if score > 0.5 else "real",
                               latency_ms=1.0, provider_name=self.provider_name,
                               provider_version="mock-1")

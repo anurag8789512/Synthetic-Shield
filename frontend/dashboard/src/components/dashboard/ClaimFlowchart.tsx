@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import { CheckCircle, AlertTriangle, Shield, Clock, FileText, Send, XCircle, Loader, Download } from 'lucide-react'
 import { C } from '../common/ui'
 import { fetchAllClaims, getReportPdfUrl } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 const ACTION_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-  claim_received: { icon: FileText, color: '#2563EB', label: 'Claim Submitted' },
-  detection_completed: { icon: Shield, color: '#0284C7', label: 'AI Detection Completed' },
+  claim_received: { icon: FileText, color: '#800020', label: 'Claim Submitted' },
+  detection_completed: { icon: Shield, color: '#6E1423', label: 'AI Detection Completed' },
   adjudication_routed: { icon: AlertTriangle, color: '#F59E0B', label: 'Adjudication Decision' },
   payout_initiated: { icon: CheckCircle, color: '#10B981', label: 'Payout Initiated' },
-  notification_sent: { icon: Send, color: '#6366F1', label: 'Notification Sent' },
+  notification_sent: { icon: Send, color: '#800020', label: 'Notification Sent' },
   moderator_approved: { icon: CheckCircle, color: '#10B981', label: 'Moderator Approved' },
   moderator_rejected: { icon: XCircle, color: '#EF4444', label: 'Moderator Rejected' },
   siu_vote_cast: { icon: AlertTriangle, color: '#DC2626', label: 'SIU Vote Cast' },
@@ -47,7 +48,8 @@ export default function ClaimFlowchart() {
       if (Array.isArray(data)) {
         const withTrail = data.filter((c: any) => c.audit_trail && c.audit_trail.length > 0)
         setClaims(withTrail)
-        if (withTrail.length > 0 && !selected) setSelected(withTrail[0].claim_number)
+        // functional update: this closure is created once, so `selected` here is stale
+        if (withTrail.length > 0) setSelected(prev => prev ?? withTrail[0].claim_number)
       }
       setLoading(false)
     }
@@ -90,8 +92,8 @@ export default function ClaimFlowchart() {
               onClick={() => setSelected(c.claim_number)}
               style={{
                 padding: '10px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',
-                background: sel ? '#EFF6FF' : '#fff',
-                border: `1px solid ${sel ? '#BFDBFE' : '#F1F5F9'}`,
+                background: sel ? '#F9EEF1' : '#fff',
+                border: `1px solid ${sel ? '#E7C3CD' : '#F3F0F1'}`,
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -141,7 +143,7 @@ export default function ClaimFlowchart() {
             {/* Flowchart steps */}
             <div style={{ position: 'relative', paddingLeft: 28 }}>
               {/* Vertical line */}
-              <div style={{ position: 'absolute', left: 11, top: 12, bottom: 12, width: 2, background: '#E2E8F0', borderRadius: 1 }} />
+              <div style={{ position: 'absolute', left: 11, top: 12, bottom: 12, width: 2, background: '#E4E0E1', borderRadius: 1 }} />
 
               {claim.audit_trail.map((step, i) => {
                 const config = getActionConfig(step.action)
@@ -168,7 +170,7 @@ export default function ClaimFlowchart() {
                         <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{config.label}</div>
                         {step.created_at && (
                           <div style={{ fontSize: 9, color: C.mutedLight, fontFamily: 'monospace' }}>
-                            {new Date(step.created_at).toLocaleTimeString()}
+                            {serverDate(step.created_at).toLocaleTimeString()}
                           </div>
                         )}
                       </div>
@@ -182,7 +184,7 @@ export default function ClaimFlowchart() {
                           {Object.entries(details).map(([key, val]) => (
                             <span key={key} style={{
                               fontSize: 9, padding: '2px 8px', borderRadius: 4,
-                              background: '#F8FAFC', border: `1px solid ${C.border}`,
+                              background: '#FFFFFF', border: `1px solid ${C.border}`,
                               color: C.textSub, fontFamily: 'monospace',
                             }}>
                               {key}: {typeof val === 'number' ? val.toFixed(1) : String(val)}

@@ -133,7 +133,7 @@ async def notify_claim_status(
         print(f"[NOTIFY] Unknown template: {template_type}")
         return
 
-    payout_amount = f"{settings.MOCK_PAYOUT_AMOUNT_CENTS / 100:,.2f}"
+    payout_amount = f"{(claim.payout_amount_cents or settings.MOCK_PAYOUT_AMOUNT_CENTS) / 100:,.2f}"
     params = {
         "name": user.full_name,
         "claim_number": claim.claim_number,
@@ -222,7 +222,7 @@ async def retry_failed_notifications(db: DBSession) -> dict:
                 if claim and template:
                     user = db.query(User).filter(User.id == claim.user_id).first()
                     if user:
-                        payout_amount = f"{settings.MOCK_PAYOUT_AMOUNT_CENTS / 100:,.2f}"
+                        payout_amount = f"{(claim.payout_amount_cents or settings.MOCK_PAYOUT_AMOUNT_CENTS) / 100:,.2f}"
                         params = {"name": user.full_name, "claim_number": claim.claim_number, "payout_amount": payout_amount, "reason": ""}
                         subject = template["subject"].format(**params)
                         body = template["body"].format(**params)

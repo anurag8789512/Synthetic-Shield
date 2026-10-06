@@ -28,7 +28,7 @@ def _subs(metadata=None, image=None, video=None, audio=None, text=None, consiste
 def test_worked_example_a_clean_claim():
     subs = _subs(metadata=6, image=4, video=5, audio=3, text=4, consistency=7)
     r = fuse(subs, CFG)
-    assert round(r["base_score"], 2) == 4.84
+    assert round(r["base_score"], 2) == 4.74
     assert round(r["final_score"]) == 5
     assert r["routing_band"] == "AUTO_APPROVE"
     assert r["escalated"] is False
@@ -38,7 +38,7 @@ def test_worked_example_a_clean_claim():
 def test_worked_example_b_ai_photos():
     subs = _subs(metadata=85, image=96, video=20, audio=30, text=55, consistency=88)
     r = fuse(subs, CFG)
-    assert round(r["base_score"], 2) == 61.42
+    assert round(r["base_score"], 2) == 59.30
     assert r["escalated"] is True
     assert r["escalation_source"] == "image"
     assert r["final_score"] == 91
@@ -49,8 +49,8 @@ def test_worked_example_b_ai_photos():
 def test_worked_example_c_edited_plausible():
     subs = _subs(metadata=45, image=60, video=15, audio=12, text=20, consistency=25)
     r = fuse(subs, CFG)
-    assert round(r["base_score"], 2) == 29.76
-    assert round(r["final_score"]) == 30
+    assert round(r["base_score"], 2) == 28.40
+    assert round(r["final_score"]) == 28
     assert r["routing_band"] == "HUMAN_REVIEW"
     assert r["escalated"] is False
 
@@ -62,8 +62,8 @@ def test_renormalization_video_not_applicable():
     r = fuse(subs, CFG)
     assert abs(sum(r["weights_used"].values()) - 1.0) < 1e-9
     assert "video" not in r["weights_used"]
-    # recompute expected: weights /(1-0.22)
-    expected = (0.10 * 6 + 0.22 * 4 + 0.18 * 3 + 0.08 * 4 + 0.20 * 7) / 0.78
+    # recompute expected: weights /(1-0.24)
+    expected = (0.02 * 6 + 0.24 * 4 + 0.20 * 3 + 0.08 * 4 + 0.22 * 7) / 0.76
     assert abs(r["base_score"] - expected) < 1e-9
 
 
@@ -151,7 +151,7 @@ def test_external_match_virtual_signal_escalation():
     ))
     r = fuse(subs, CFG)
     assert r["escalated"] is True
-    assert r["escalation_source"] == "consistency"
+    assert r["escalation_source"] == "consistency:C-H3"
     assert r["final_score"] == max(r["base_score"], 87)
     assert r["routing_band"] == "SIU_INVESTIGATION"
 

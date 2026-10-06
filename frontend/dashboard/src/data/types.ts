@@ -66,6 +66,7 @@ export interface Claim {
   score: number
   status: ClaimStatus
   time: string
+  submittedAt?: string   // raw server created_at (naive UTC)
   isLive: boolean
   incidentType: string
   location: string

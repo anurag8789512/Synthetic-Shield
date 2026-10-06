@@ -1,7 +1,11 @@
 """ImagePixelAnalyzer — in-house pixel-level forensics (spec §4.1). NO vendor API.
 
-Four published classical-forensics checks, each 0-100, combined as a weighted
-mean with config component weights. Not-applicable components re-normalize.
+Two groups, each 0-100; S_image = max(editing, synthesis):
+- editing: ELA, JPEG double-quantization, noise consistency — localized
+  manipulation of a real photo (not-applicable components re-normalize);
+- synthesis: flat-region micro-texture, tonal clipping, saturation — fully
+  AI-generated / AI-upscaled imagery. A C2PA manifest declaring AI generation
+  forces synthesis to 100.
 """
 from __future__ import annotations
 
@@ -11,9 +15,17 @@ from pathlib import Path
 import numpy as np
 
 from app.scoring.config import ScoringConfig
-from app.scoring.models import SubScore
+from app.scoring.models import Finding, SubScore
+from app.scoring.provenance import read_c2pa
 
 EPS = 1e-9
+SYNTH_LONG_SIDE = 1280
+IMMERKAER_KERNEL = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
+LABELS = {
+    "ela": "error-level analysis", "jpeg_dq": "double-quantization periodicity",
+    "noise": "noise inconsistency", "texture": "synthetic micro-texture in flat regions",
+    "clipping": "generative tonal clipping", "saturation": "boosted saturation",
+}
 
 
 def _ramp(x: float, lo: float, hi: float) -> float:
@@ -45,6 +57,7 @@ class ImagePixelAnalyzer:
     def __init__(self, config: ScoringConfig):
         self.cfg = config.image_pixel
 
+    # ── Editing group ──────────────────────────────────────────────────────────
     # Component 1 — Error Level Analysis (suggestive only; lowest weight)
     def _ela(self, path: Path) -> float:
         from PIL import Image
@@ -149,65 +162,38 @@ class ImagePixelAnalyzer:
         ratio = max(cells) / (float(np.median(cells)) + EPS)
         return _ramp(ratio, cfg.n0 or 4.0, cfg.n1 or 12.0)
 
-    # Component 4 — generative-artifact frequency analysis
-    def _freq_artifacts(self, path: Path, is_jpeg: bool, claimed_camera_original: bool) -> float:
-        cfg = self.cfg.freq
-        gray = _load_gray(path)
-        # Hann window kills boundary spectral leakage (axis streaks) before the FFT
-        h, w = gray.shape
-        window = np.outer(np.hanning(h), np.hanning(w))
-        f = np.fft.fftshift(np.fft.fft2((gray - gray.mean()) * window))
-        power = np.abs(f) ** 2
-        cy, cx = h // 2, w // 2
-        yy, xx = np.ogrid[:h, :w]
-        # mask the central axes — residual leakage lives there, not in real artifacts
-        axis_mask = (np.abs(yy - cy) > 2) & (np.abs(xx - cx) > 2)
-        radius = np.hypot(yy - cy, xx - cx).astype(np.int64)
-        max_r = min(cy, cx)
-        flat_r = radius[axis_mask].ravel()
-        flat_p = power[axis_mask].ravel()
-        radial = np.bincount(flat_r, weights=flat_p, minlength=max_r)[:max_r]
-        counts = np.bincount(flat_r, minlength=max_r)[:max_r]
-        profile = radial / np.maximum(counts, 1)
-        if profile.size < 16:
-            return 0.0
-        log_prof = np.log10(profile + EPS)
+    # ── Synthesis group: fully AI-generated / AI-upscaled imagery ──────────────
+    # Generators render "detail" everywhere — flat regions (sky, paint, road) carry
+    # micro-texture a phone ISP would have denoised — and tone-map aggressively
+    # (crushed blacks/whites, boosted saturation). Measured at a fixed scale so
+    # resolution doesn't shift the statistics.
+    def _synthesis_features(self, path: Path) -> dict[str, float]:
+        import cv2
+        bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise ValueError(f"cannot decode image: {path.name}")
+        h, w = bgr.shape[:2]
+        scale = SYNTH_LONG_SIDE / max(h, w)
+        if scale < 1.0:
+            bgr = cv2.resize(bgr, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float64)
 
-        # (a) high-frequency roll-off flatness (top third of radii).
-        # Log-log slope is scale-invariant: natural images decay ~1/f^2 (slope <= -2),
-        # synthetic/upsampled content flattens toward 0.
-        start = 2 * profile.size // 3
-        hi = log_prof[start:]
-        log_r = np.log10(np.arange(start, profile.size, dtype=np.float64) + 1.0)
-        slope = float(np.polyfit(log_r, hi, 1)[0]) if hi.size >= 2 else -2.0
-        flatness = float(np.clip(1.0 - abs(slope) / 2.0, 0.0, 1.0))
+        # flat-region texture: Immerkaer noise estimate over the 20% lowest-gradient pixels
+        lap = cv2.filter2D(gray, -1, IMMERKAER_KERNEL)
+        grad = np.hypot(cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3),
+                        cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3))
+        flat = grad < np.percentile(grad, 20)
+        texture = float(np.sqrt(np.pi / 2) * np.abs(lap[flat]).mean() / 6.0) if flat.any() else 0.0
 
-        # (b) periodic spectral spikes (upsampling artifacts): peak height in decades
-        # above the smoothed profile. JPEG 8-px blocking creates benign harmonics at
-        # multiples of dim/8 — mask those radii so real photos don't false-positive.
-        smooth = np.convolve(log_prof, np.ones(9) / 9.0, mode="same")
-        resid = log_prof - smooth
-        harmonic_mask = np.zeros(profile.size, dtype=bool)
-        for dim in (h, w):
-            step = dim / 8.0
-            k = 1
-            while k * step < profile.size:
-                center = int(round(k * step))
-                lo_b, hi_b = max(center - 4, 0), min(center + 5, profile.size)
-                harmonic_mask[lo_b:hi_b] = True
-                k += 1
-        resid[harmonic_mask] = 0.0
-        hi_resid = resid[profile.size // 3:]
-        peak_decades = float(hi_resid.max()) if hi_resid.size else 0.0
-        spike_energy = float(np.clip((peak_decades - 0.8) / 1.2, 0.0, 1.0))
+        clipping = float(100.0 * ((gray <= 2) | (gray >= 253)).mean())
+        saturation = float(cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[..., 1].mean())
+        return {"texture": texture, "clipping": clipping, "saturation": saturation}
 
-        metric = max(flatness, spike_energy)
-        score = _ramp(metric, cfg.f0 or 0.15, cfg.f1 or 0.45)
-
-        # camera-original .jpg with NO JPEG blocking at all → floor at 60
-        if is_jpeg and claimed_camera_original and self._blocking_absent(gray):
-            score = max(score, 60.0)
-        return score
+    def _synthesis(self, path: Path) -> tuple[float, dict[str, float]]:
+        raw = self._synthesis_features(path)
+        scores = {k: _ramp(raw[k], getattr(self.cfg, k).lo, getattr(self.cfg, k).hi) for k in raw}
+        total = sum(self.cfg.synthesis_weights[k] * v for k, v in scores.items())
+        return total, scores
 
     @staticmethod
     def _blocking_absent(gray: np.ndarray) -> bool:
@@ -222,31 +208,58 @@ class ImagePixelAnalyzer:
     def analyze(self, path: str | Path, claimed_camera_original: bool = False) -> SubScore:
         path = Path(path)
         is_jpeg = path.suffix.lower() in (".jpg", ".jpeg")
-        weights = dict(self.cfg.component_weights)
-        components: dict[str, float | None] = {
+        findings: list[Finding] = []
+
+        # editing group (weights re-normalize over applicable components)
+        editing_parts: dict[str, float | None] = {
             "ela": self._ela(path),
             "jpeg_dq": self._jpeg_dq(path, is_jpeg),
             "noise": self._noise_consistency(path),
-            "freq": self._freq_artifacts(path, is_jpeg, claimed_camera_original),
         }
-        applicable = {k: v for k, v in components.items() if v is not None}
-        if not applicable:
-            return SubScore(name="image", status="unavailable", provider="in_house_pixel_v1")
+        applicable = {k: v for k, v in editing_parts.items() if v is not None}
+        weights = self.cfg.component_weights
         total_w = sum(weights[k] for k in applicable)
-        value = sum(weights[k] / total_w * v for k, v in applicable.items())
+        editing = sum(weights[k] / total_w * v for k, v in applicable.items()) if total_w else 0.0
+        # a camera-original JPEG always carries 8x8 blocking; none at all means re-rendered
+        if is_jpeg and claimed_camera_original and self._blocking_absent(_load_gray(path)):
+            editing = max(editing, 60.0)
+            findings.append(Finding(
+                rule_id="I-NOBLOCK", severity="medium", points=0.0, file_id=path.name,
+                human_readable=(f"Photo {path.name} carries camera EXIF but no JPEG 8x8 blocking "
+                                f"signature, inconsistent with an original camera capture."),
+            ))
 
-        fired = [f"{k.replace('jpeg_dq', 'double-quantization periodicity').replace('ela', 'error-level analysis').replace('noise', 'noise inconsistency').replace('freq', 'generative frequency artifacts')} ({v:.0f}/100)"
-                 for k, v in applicable.items() if v >= 50]
-        desc = (f"Photo {path.name}: " + (" and ".join(fired) + " indicate localized editing or synthesis."
-                if fired else "no significant pixel-level manipulation indicators."))
-        sub = SubScore(name="image", value=float(np.clip(value, 0, 100)), status="ok",
-                       provider="in_house_pixel_v1",
-                       components={k: round(v, 1) for k, v in applicable.items()})
-        sub.findings = []
-        from app.scoring.models import Finding
-        sub.findings.append(Finding(
+        synthesis, synth_parts = self._synthesis(path)
+        c2pa_info = read_c2pa(path)
+        if c2pa_info and c2pa_info.ai_generated:
+            synthesis = 100.0
+            findings.append(Finding(
+                rule_id="I-C2PA-AI", severity="high", points=0.0, file_id=path.name,
+                human_readable=(f"Photo {path.name} carries C2PA content credentials declaring it "
+                                f"AI-generated" + (f" ({c2pa_info.generator})." if c2pa_info.generator else ".")),
+                extra={"generator": c2pa_info.generator},
+            ))
+
+        value = float(np.clip(max(editing, synthesis), 0.0, 100.0))
+        components = {**{k: round(v, 1) for k, v in applicable.items()},
+                      **{k: round(v, 1) for k, v in synth_parts.items()},
+                      "editing": round(editing, 1), "synthesis": round(synthesis, 1)}
+
+        if synthesis >= 50 and synthesis >= editing:
+            fired = ", ".join(LABELS[k] for k, v in synth_parts.items() if v >= 50) or "provenance data"
+            desc = (f"Photo {path.name}: synthesis indicators {synthesis:.0f}/100 ({fired}) — "
+                    f"consistent with AI-generated or AI-upscaled imagery.")
+        elif editing >= 50:
+            fired = ", ".join(LABELS[k] for k, v in applicable.items() if v >= 50) or "re-rendering"
+            desc = (f"Photo {path.name}: editing indicators {editing:.0f}/100 ({fired}) — "
+                    f"consistent with localized manipulation.")
+        else:
+            desc = (f"Photo {path.name}: no significant pixel-level manipulation or synthesis "
+                    f"indicators (editing {editing:.0f}, synthesis {synthesis:.0f}).")
+        findings.insert(0, Finding(
             rule_id="I-PIXEL", severity="info", points=0.0, file_id=path.name,
-            human_readable=desc, extra={"components": sub.components,
-                                        "not_applicable": [k for k, v in components.items() if v is None]},
+            human_readable=desc, extra={"components": components,
+                                        "not_applicable": [k for k, v in editing_parts.items() if v is None]},
         ))
-        return sub
+        return SubScore(name="image", value=value, status="ok", provider="in_house_pixel_v2",
+                        components=components, findings=findings)

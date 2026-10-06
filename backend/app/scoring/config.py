@@ -81,26 +81,34 @@ class RampConfig(BaseModel):
     p1: float | None = None
     n0: float | None = None
     n1: float | None = None
-    f0: float | None = None
-    f1: float | None = None
+    lo: float | None = None
+    hi: float | None = None
     quality: int | None = None
 
 
 class ImagePixelConfig(BaseModel):
-    component_weights: Dict[str, float]
+    component_weights: Dict[str, float]   # editing group
+    synthesis_weights: Dict[str, float]
     ela: RampConfig
     dq: RampConfig
     noise: RampConfig
-    freq: RampConfig
+    texture: RampConfig
+    clipping: RampConfig
+    saturation: RampConfig
 
     @model_validator(mode="after")
     def _weights(self):
-        expected = {"ela", "jpeg_dq", "noise", "freq"}
-        if set(self.component_weights) != expected:
-            raise ValueError(f"image_pixel.component_weights keys must be {expected}")
-        total = sum(self.component_weights.values())
-        if abs(total - 1.0) > 1e-9:
-            raise ValueError("image_pixel.component_weights must sum to 1.0")
+        for field, expected in (("component_weights", {"ela", "jpeg_dq", "noise"}),
+                                ("synthesis_weights", {"texture", "clipping", "saturation"})):
+            weights = getattr(self, field)
+            if set(weights) != expected:
+                raise ValueError(f"image_pixel.{field} keys must be {expected}")
+            if abs(sum(weights.values()) - 1.0) > 1e-9:
+                raise ValueError(f"image_pixel.{field} must sum to 1.0")
+        for name in ("texture", "clipping", "saturation"):
+            ramp = getattr(self, name)
+            if ramp.lo is None or ramp.hi is None or ramp.hi <= ramp.lo:
+                raise ValueError(f"image_pixel.{name} needs lo < hi")
         return self
 
 

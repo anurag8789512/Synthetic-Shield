@@ -1,6 +1,8 @@
 """PDF metadata rule functions (spec §3.2 M-M3, M-L2)."""
 from __future__ import annotations
 
+import re
+
 from app.scoring.config import MetadataConfig
 from app.scoring.models import Finding
 
@@ -23,8 +25,12 @@ def extract_pdf_meta(path: str) -> dict:
         pass
     try:
         raw = open(path, "rb").read()
-        # each %%EOF marks the end of a cross-reference revision
-        meta["revisions"] = max(raw.count(b"%%EOF"), 1)
+        # each %%EOF marks the end of a cross-reference revision; linearized
+        # ("fast web view") PDFs are written with two sections from the start
+        eofs = raw.count(b"%%EOF")
+        if b"/Linearized" in raw[:2048]:
+            eofs -= 1
+        meta["revisions"] = max(eofs, 1)
     except OSError:
         pass
     return meta
@@ -57,7 +63,7 @@ def rule_m_l2_generic_producer(meta: dict, cfg: MetadataConfig, file_id: str,
     if not claimed_official:
         return None
     producer = (meta.get("producer") or "").strip().lower()
-    if any(g in producer for g in GENERIC_PRODUCERS):
+    if any(re.search(rf"(?<![a-z]){re.escape(g)}(?![a-z])", producer) for g in GENERIC_PRODUCERS):
         return Finding(
             rule_id="M-L2", severity="low", points=cfg.low, file_id=file_id,
             human_readable=(

@@ -87,11 +87,22 @@ INCIDENT_ZONE_COMPATIBILITY: dict[str, set[str]] = {
 HARD_CONFLICTS = [{"front", "rear"}, {"left", "right"}]
 
 
+def _find(text: str, kw: str) -> int:
+    """Position of kw as a whole word (plural/verb suffixes allowed), else -1 — so "rim"
+    doesn't hit "crime" and "hood" doesn't hit "neighborhood"."""
+    m = re.search(rf"(?<![a-z]){re.escape(kw)}(?:e?s|e?d|ing)?(?![a-z])", text)
+    return m.start() if m else -1
+
+
+def _has(text: str, kws: list[str]) -> bool:
+    return any(_find(text, kw) >= 0 for kw in kws)
+
+
 def _first_match(text: str, keyword_map: dict[str, list[str]]) -> str | None:
     hits = []
     for label, kws in keyword_map.items():
         for kw in kws:
-            pos = text.find(kw)
+            pos = _find(text, kw)
             if pos >= 0:
                 hits.append((pos, len(kw), label))
                 break
@@ -103,7 +114,7 @@ def _first_match(text: str, keyword_map: dict[str, list[str]]) -> str | None:
 
 
 def _all_zone_matches(text: str) -> list[str]:
-    zones = [z for z, kws in IMPACT_ZONE_KEYWORDS.items() if any(kw in text for kw in kws)]
+    zones = [z for z, kws in IMPACT_ZONE_KEYWORDS.items() if _has(text, kws)]
     return zones
 
 
@@ -134,7 +145,7 @@ def extract_facts(text: str | None, source: str,
 def _parts(t: str) -> list[str]:
     parts = []
     for part, kws in DAMAGED_PART_KEYWORDS.items():
-        if any(kw in t for kw in kws) and part not in parts:
+        if _has(t, kws) and part not in parts:
             parts.append(part)
     return parts
 

@@ -2,7 +2,9 @@
 
 Samples frames, runs the §4.1 image battery per frame, plus temporal checks
 (noise-profile discontinuity, optical-flow discontinuity).
-S_video = 0.7 * p95(per-frame scores) + 0.3 * temporal_component.
+S_video = max(0.7 * p95(per-frame scores) + 0.3 * temporal_component,
+              median(per-frame synthesis)) — synthesis present across most frames
+is evidence of a generated clip on its own; a C2PA AI declaration forces 100.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import numpy as np
 from app.scoring.config import ScoringConfig
 from app.scoring.models import Finding, SubScore
 from app.scoring.level2_manipulation.image_pixel import ImagePixelAnalyzer, _ramp
+from app.scoring.provenance import read_c2pa
 
 EPS = 1e-9
 
@@ -57,15 +60,17 @@ class VideoPixelAnalyzer:
         cap.release()
         return frames
 
-    def _frame_score(self, frame: np.ndarray) -> float:
-        """Run the image component battery on one frame (via a temp PNG)."""
+    def _frame_score(self, frame: np.ndarray) -> tuple[float, float]:
+        """Run the image component battery on one frame (via a temp PNG).
+        Returns (frame score, frame synthesis score)."""
         import cv2
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
             cv2.imwrite(str(tmp_path), frame)
             sub = self.image_analyzer.analyze(tmp_path)
-            return sub.value if sub.value is not None else 0.0
+            return (sub.value if sub.value is not None else 0.0,
+                    float(sub.components.get("synthesis", 0.0)))
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -125,18 +130,36 @@ class VideoPixelAnalyzer:
         if not frames:
             return SubScore(name="video", status="unavailable", provider="in_house_pixel_v1")
 
-        per_frame = np.array([self._frame_score(f) for f in frames])
+        scored = [self._frame_score(f) for f in frames]
+        per_frame = np.array([s for s, _ in scored])
+        synthesis = float(np.median([syn for _, syn in scored]))
         p95 = float(np.percentile(per_frame, 95))
         temporal, details = self._temporal_component(frames)
-        value = float(np.clip(0.7 * p95 + 0.3 * temporal, 0.0, 100.0))
+        findings: list[Finding] = []
+
+        c2pa_info = read_c2pa(path)
+        if c2pa_info and c2pa_info.ai_generated:
+            synthesis = 100.0
+            findings.append(Finding(
+                rule_id="V-C2PA-AI", severity="high", points=0.0, file_id=path.name,
+                human_readable=(f"Video {path.name} carries C2PA content credentials declaring it "
+                                f"AI-generated" + (f" ({c2pa_info.generator})." if c2pa_info.generator else ".")),
+                extra={"generator": c2pa_info.generator},
+            ))
+        value = float(np.clip(max(0.7 * p95 + 0.3 * temporal, synthesis), 0.0, 100.0))
 
         desc = (f"Video {path.name}: {len(frames)} sampled frames, 95th-percentile frame score "
-                f"{p95:.0f}/100, temporal component {temporal:.0f}/100"
+                f"{p95:.0f}/100, median frame synthesis {synthesis:.0f}/100, temporal component "
+                f"{temporal:.0f}/100"
                 + (f" ({details.get('anomalous_noise_frames', 0)} noise-discontinuity frames, "
-                   f"{details.get('flow_discontinuities', 0)} optical-flow discontinuities)." if details else "."))
+                   f"{details.get('flow_discontinuities', 0)} optical-flow discontinuities)." if details else ".")
+                + (" Synthesis indicators are consistent across frames, as in an "
+                   "AI-generated clip." if synthesis >= 50 else ""))
+        findings.insert(0, Finding(rule_id="V-PIXEL", severity="info", points=0.0,
+                                   file_id=path.name, human_readable=desc, extra=details))
         return SubScore(
-            name="video", value=value, status="ok", provider="in_house_pixel_v1",
-            components={"frame_p95": round(p95, 1), "temporal": round(temporal, 1)},
-            findings=[Finding(rule_id="V-PIXEL", severity="info", points=0.0,
-                              file_id=path.name, human_readable=desc, extra=details)],
+            name="video", value=value, status="ok", provider="in_house_pixel_v2",
+            components={"frame_p95": round(p95, 1), "synthesis": round(synthesis, 1),
+                        "temporal": round(temporal, 1)},
+            findings=findings,
         )

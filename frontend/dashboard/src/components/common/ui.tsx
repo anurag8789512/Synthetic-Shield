@@ -2,18 +2,18 @@ import type { CSSProperties, ReactNode, ButtonHTMLAttributes } from 'react'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 export const C = {
-  primary:    '#0284C7',
-  blue:       '#2563EB',
+  primary:    '#6E1423',
+  blue:       '#800020',
   red:        '#EF4444',
   amber:      '#F59E0B',
   green:      '#10B981',
-  muted:      '#64748B',
-  mutedLight: '#94A3B8',
-  border:     '#E2E8F0',
-  bg:         '#F8FAFC',
+  muted:      '#595959',
+  mutedLight: '#8A8A8A',
+  border:     '#E4E0E1',
+  bg:         '#FFFFFF',
   card:       '#FFFFFF',
-  text:       '#0F172A',
-  textSub:    '#475569',
+  text:       '#121212',
+  textSub:    '#3A3A3A',
 } as const
 
 // ── StatusPill ────────────────────────────────────────────────────────────────
@@ -22,12 +22,12 @@ const STATUS_CONFIG = {
   review:   { label: 'Moderator Review',   bg: '#FFFBEB', color: '#D97706', border: '#FDE68A' },
   siu:      { label: 'SIU Investigation',  bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
   active:   { label: 'Active',             bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
-  draft:    { label: 'Draft',              bg: '#F8FAFC', color: '#64748B', border: '#E2E8F0' },
-  final:    { label: 'Final',              bg: '#EFF6FF', color: '#2563EB', border: '#BFDBFE' },
+  draft:    { label: 'Draft',              bg: '#FFFFFF', color: '#595959', border: '#E4E0E1' },
+  final:    { label: 'Final',              bg: '#F9EEF1', color: '#800020', border: '#E7C3CD' },
   open:     { label: 'Open',              bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
   closed:   { label: 'Closed',            bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
   pending:  { label: 'Pending',           bg: '#FFFBEB', color: '#D97706', border: '#FDE68A' },
-  processing: { label: 'Processing',      bg: '#EFF6FF', color: '#2563EB', border: '#BFDBFE' },
+  processing: { label: 'Processing',      bg: '#F9EEF1', color: '#800020', border: '#E7C3CD' },
   rejected: { label: 'Rejected',          bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
   moderator_approved: { label: 'Approved (Moderator)', bg: '#F0FDF4', color: '#059669', border: '#BBF7D0' },
   confirmed_fraud: { label: 'Fraud Confirmed', bg: '#FFF5F5', color: '#DC2626', border: '#FECACA' },
@@ -53,7 +53,20 @@ export function StatusPill({ status, size = 'sm' }: { status: StatusKey; size?: 
 }
 
 // ── RiskBadge ─────────────────────────────────────────────────────────────────
-export function RiskBadge({ score }: { score: number }) {
+export function RiskBadge({ score, pending }: { score: number; pending?: boolean }) {
+  if (pending) {
+    // score not generated yet — blinking dots instead of a misleading 0%
+    return (
+      <span title="Score is being formulated" style={{
+        fontSize: 11, fontWeight: 700, color: C.blue,
+        background: '#F9EEF1', border: '1px solid #E7C3CD',
+        borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap' as const,
+        fontFamily: 'monospace',
+      }}>
+        <span className="blink-dot">.</span><span className="blink-dot">.</span><span className="blink-dot">.</span>
+      </span>
+    )
+  }
   const color = score < 15 ? C.green : score <= 85 ? C.amber : C.red
   return (
     <span style={{
@@ -138,9 +151,9 @@ export function FormInput({ label, placeholder, value, onChange, type = 'text', 
     padding: '9px 12px', fontSize: 14, borderRadius: 8,
     fontFamily: 'Inter, system-ui, sans-serif',
     outline: 'none', transition: 'border-color 0.15s',
-    background: dark ? 'rgba(255,255,255,0.06)' : '#F8FAFC',
+    background: dark ? 'rgba(255,255,255,0.06)' : '#FFFFFF',
     border: dark ? '1px solid rgba(255,255,255,0.12)' : `1px solid ${C.border}`,
-    color: dark ? '#E8EDF5' : C.text,
+    color: dark ? '#EFEAEB' : C.text,
   }
   return (
     <div>

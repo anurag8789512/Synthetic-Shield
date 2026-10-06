@@ -9,6 +9,7 @@ import json
 from sqlalchemy.orm import Session as DBSession
 
 from app.models import Claim, ClaimMediaAnalysis
+from app.scoring.config import get_config
 from app.scoring.models import ScoreBreakdown, SubScore
 from app.scoring.orchestrator import run_scoring
 
@@ -20,7 +21,7 @@ BAND_TO_STATUS = {
 
 SUBSCORE_EXPLANATIONS = {
     "metadata": "Metadata forensics across all uploaded files (EXIF, container tags, PDF metadata, duplicate-evidence hashes).",
-    "image": "In-house pixel-level forensics: error-level analysis, JPEG double-quantization, noise consistency, generative frequency artifacts.",
+    "image": "In-house pixel-level forensics: editing checks (error-level analysis, JPEG double-quantization, noise consistency) and AI-synthesis checks (flat-region micro-texture, tonal clipping, saturation), plus C2PA provenance.",
     "video": "In-house frame-level forensics: per-frame pixel battery plus temporal noise and optical-flow discontinuity checks.",
     "audio": "Foreign detector verdict on voice-statement authenticity.",
     "text": "Cross-checked AI-generated-text detectors on the written statement.",
@@ -33,7 +34,10 @@ def _severity(score: float) -> str:
 
 
 def _verdict(score: float) -> str:
-    return "authentic" if score < 15 else "inconclusive" if score <= 85 else "synthetic"
+    routing = get_config().fusion.routing
+    if score < routing.auto_approve_below:
+        return "authentic"
+    return "inconclusive" if score <= routing.siu_above else "synthetic"
 
 
 def _modality_report(sub: SubScore, weight: float) -> dict:

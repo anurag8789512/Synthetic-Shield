@@ -18,7 +18,7 @@ function SignalRow({ s }: { s: ScoreSignal }) {
   const hasDetail = s.findings.length > 0 || !!s.components
   const na = s.status !== 'ok' || s.value == null
   return (
-    <div style={{ borderTop: `1px solid #F1F5F9` }}>
+    <div style={{ borderTop: `1px solid #F3F0F1` }}>
       <div
         onClick={() => hasDetail && setOpen(o => !o)}
         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: hasDetail ? 'pointer' : 'default' }}
@@ -33,7 +33,7 @@ function SignalRow({ s }: { s: ScoreSignal }) {
           </span>
         ) : (
           <>
-            <div style={{ flex: 1, height: 5, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ flex: 1, height: 5, background: '#F3F0F1', borderRadius: 3, overflow: 'hidden' }}>
               <div style={{ width: `${Math.min(s.value!, 100)}%`, height: '100%', background: scoreColor(s.value!), borderRadius: 3 }} />
             </div>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: scoreColor(s.value!), width: 34, textAlign: 'right' as const, fontFamily: 'monospace' }}>
@@ -50,7 +50,7 @@ function SignalRow({ s }: { s: ScoreSignal }) {
           {s.components && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {Object.entries(s.components).map(([k, v]) => (
-                <span key={k} style={{ fontSize: 8.5, padding: '2px 7px', borderRadius: 4, background: '#F8FAFC', border: `1px solid ${C.border}`, color: C.textSub, fontFamily: 'monospace' }}>
+                <span key={k} style={{ fontSize: 8.5, padding: '2px 7px', borderRadius: 4, background: '#FFFFFF', border: `1px solid ${C.border}`, color: C.textSub, fontFamily: 'monospace' }}>
                   {k}: {typeof v === 'number' ? v.toFixed(0) : String(v)}
                 </span>
               ))}
@@ -75,7 +75,7 @@ export function ScoreBreakdownPanel({ breakdown }: { breakdown: ScoreBreakdown }
           if (signals.length === 0) return null
           return (
             <div key={level.id}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#F8FAFC' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#FFFFFF' }}>
                 <Layers size={10} color={C.muted} />
                 <span style={{ fontSize: 9, fontWeight: 700, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>
                   {level.label}
@@ -86,7 +86,7 @@ export function ScoreBreakdownPanel({ breakdown }: { breakdown: ScoreBreakdown }
           )
         })}
         {/* Fusion summary */}
-        <div style={{ borderTop: `1px solid ${C.border}`, padding: '8px 10px', background: '#FAFBFC', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, padding: '8px 10px', background: '#FFFFFF', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <span style={{ fontSize: 10, color: C.textSub }}>
             Base <strong style={{ fontFamily: 'monospace' }}>{breakdown.baseScore.toFixed(1)}</strong>
           </span>

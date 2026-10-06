@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { Users, BarChart3, CheckCircle, Clock, TrendingUp, ChevronDown, ArrowRightLeft } from 'lucide-react'
 import { C } from '../common/ui'
 import { fetchOfficers, fetchWorkloadSummary, fetchOfficerAssignments, reassignAssignment } from '../../data/api'
+import { serverDate } from '../../data/time'
 
 interface OfficerStats {
   id: number
@@ -152,7 +153,7 @@ export default function Efficiency() {
               return (
                 <div key={ol.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 100, fontSize: 11, fontWeight: 600, color: C.text, flexShrink: 0 }}>{ol.name}</div>
-                  <div style={{ flex: 1, height: 8, background: '#F1F5F9', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ flex: 1, height: 8, background: '#F3F0F1', borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 4, transition: 'width 0.3s' }} />
                   </div>
                   <div style={{ width: 30, fontSize: 11, fontWeight: 700, color: C.text, textAlign: 'right' }}>{ol.pending}</div>
@@ -170,7 +171,7 @@ export default function Efficiency() {
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ background: '#F8FAFC' }}>
+            <tr style={{ background: '#FFFFFF' }}>
               <th style={{ textAlign: 'left', padding: '8px 14px', fontWeight: 600, color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Officer</th>
               <th style={{ textAlign: 'left', padding: '8px 14px', fontWeight: 600, color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Role</th>
               <th style={{ textAlign: 'center', padding: '8px 14px', fontWeight: 600, color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending</th>
@@ -189,7 +190,7 @@ export default function Efficiency() {
               const open = detailsFor === o.id
               return (
                 <Fragment key={o.id}>
-                  <tr style={{ borderBottom: `1px solid ${C.border}`, background: open ? '#F8FAFC' : '#fff' }}>
+                  <tr style={{ borderBottom: `1px solid ${C.border}`, background: open ? '#FFFFFF' : '#fff' }}>
                 <td style={{ padding: '10px 14px' }}>
                   <div style={{ fontWeight: 600, color: C.text }}>{o.name}</div>
                   <div style={{ fontSize: 10, color: C.mutedLight }}>{o.email}</div>
@@ -197,7 +198,7 @@ export default function Efficiency() {
                 <td style={{ padding: '10px 14px' }}>
                   <span style={{
                     fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                    background: o.role === 'senior' ? '#EFF6FF' : o.role === 'siu_officer' ? '#FFF5F5' : '#FFFBEB',
+                    background: o.role === 'senior' ? '#F9EEF1' : o.role === 'siu_officer' ? '#FFF5F5' : '#FFFBEB',
                     color: o.role === 'senior' ? C.blue : o.role === 'siu_officer' ? C.red : C.amber,
                   }}>
                     {o.role}
@@ -220,7 +221,7 @@ export default function Efficiency() {
                 <td style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 700, color: C.blue }}>{o.total_decisions}</td>
                 <td style={{ textAlign: 'center', padding: '10px 14px' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 40, height: 4, background: '#F1F5F9', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: 40, height: 4, background: '#F3F0F1', borderRadius: 2, overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${o.utilization}%`, background: o.utilization > 70 ? C.red : o.utilization > 40 ? C.amber : C.green, borderRadius: 2 }} />
                     </div>
                     <span style={{ fontSize: 10, fontWeight: 600, color: C.muted }}>{o.utilization}%</span>
@@ -233,7 +234,7 @@ export default function Efficiency() {
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
                         borderRadius: 6, border: `1px solid ${open ? C.blue : C.border}`,
-                        background: open ? '#EFF6FF' : '#fff', color: open ? C.blue : C.muted,
+                        background: open ? '#F9EEF1' : '#fff', color: open ? C.blue : C.muted,
                         fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                       }}
                     >
@@ -269,7 +270,7 @@ export default function Efficiency() {
                                 <div style={{ width: 130 }}>
                                   <div style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: C.text }}>{a.claim_number}</div>
                                   <div style={{ fontSize: 9, color: C.mutedLight, marginTop: 2 }}>
-                                    Assigned {a.assigned_at ? new Date(a.assigned_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—'}
+                                    Assigned {a.assigned_at ? serverDate(a.assigned_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—'}
                                   </div>
                                 </div>
                                 <div style={{ width: 120 }}>
@@ -296,7 +297,7 @@ export default function Efficiency() {
                                   disabled={!reassignSel[a.id] || busyId === a.id}
                                   style={{
                                     display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 6,
-                                    border: 'none', background: !reassignSel[a.id] || busyId === a.id ? '#CBD5E1' : C.blue,
+                                    border: 'none', background: !reassignSel[a.id] || busyId === a.id ? '#C8C8C8' : C.blue,
                                     color: '#fff', fontSize: 11, fontWeight: 600,
                                     cursor: !reassignSel[a.id] || busyId === a.id ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                                   }}

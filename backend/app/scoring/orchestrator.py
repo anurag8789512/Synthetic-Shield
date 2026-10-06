@@ -6,18 +6,20 @@ sub-score unavailable and never crash the pipeline (§0.7).
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
-from app.models import Claim, ClaimDocument, Coverage
+from app.models import Claim, ClaimDocument, Coverage, Policy
 from app.scoring import persistence
 from app.scoring.config import ScoringConfig, get_config
 from app.scoring.fusion import fuse
 from app.scoring.level1_metadata.analyzer import (
-    IMAGE_EXTS, MetadataAnalyzer, compute_phash, extract_container_meta,
+    MetadataAnalyzer, compute_phash, extract_container_meta,
     extract_image_meta, parse_latlon, _sha256,
 )
 from app.scoring.level2_manipulation.image_pixel import ImagePixelAnalyzer
@@ -46,16 +48,20 @@ def _demo() -> bool:
     return bool(settings.SCORING_DEMO_MODE)
 
 
-def get_audio_provider(cfg: ScoringConfig) -> DetectorProvider:
+def get_audio_provider(cfg: ScoringConfig) -> DetectorProvider | None:
+    """None when the configured detector cannot run (missing key / unknown name);
+    the audio sub-score is then marked unavailable. Mocks only run in demo mode
+    or when explicitly configured — never as a silent production fallback."""
     name = "mock" if _demo() else settings.AUDIO_DETECTOR_PROVIDER
     if name == "resemble":
         if not settings.RESEMBLE_AI_API_KEY:
-            print("[SCORING] RESEMBLE_AI_API_KEY missing — audio falls back to mock")
-            return MockDetectorProvider("mock_audio")
+            print("[SCORING] RESEMBLE_AI_API_KEY missing — audio sub-score unavailable")
+            return None
         return ResembleAudioProvider(timeout_s=cfg.providers.timeout_s)
     if name == "mock":
         return MockDetectorProvider("mock_audio")
-    raise ValueError(f"unknown AUDIO_DETECTOR_PROVIDER: {name}")
+    print(f"[SCORING] unknown AUDIO_DETECTOR_PROVIDER '{name}' — audio sub-score unavailable")
+    return None
 
 
 def get_text_providers(cfg: ScoringConfig) -> tuple[DetectorProvider | None, DetectorProvider | None]:
@@ -66,17 +72,34 @@ def get_text_providers(cfg: ScoringConfig) -> tuple[DetectorProvider | None, Det
                        ("secondary", settings.TEXT_DETECTOR_SECONDARY)):
         if name == "gptzero":
             providers.append(GPTZeroTextProvider(timeout_s=cfg.providers.timeout_s)
-                             if settings.GPTZERO_API_KEY else MockDetectorProvider(f"mock_text_{role}"))
+                             if settings.GPTZERO_API_KEY else None)
         elif name == "pangram":
             providers.append(PangramTextProvider(timeout_s=cfg.providers.timeout_s)
-                             if settings.PANGRAM_API_KEY else MockDetectorProvider(f"mock_text_{role}"))
+                             if settings.PANGRAM_API_KEY else None)
         elif name == "mock":
             providers.append(MockDetectorProvider(f"mock_text_{role}"))
-        elif name == "none":
-            providers.append(None)
         else:
-            raise ValueError(f"unknown text detector: {name}")
+            providers.append(None)
+        if providers[-1] is None and name != "none":
+            print(f"[SCORING] text detector '{name}' ({role}) not configured — skipped")
     return providers[0], providers[1]
+
+
+def _has_word(text: str, words: tuple[str, ...]) -> bool:
+    """Whole-word match where only letters count as word chars, so "fraud_test"
+    hits but "realistic" doesn't."""
+    return any(re.search(rf"(?<![a-z]){w}(?![a-z])", text) for w in words)
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value.strip(), fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _media_path(claim_number: str, url: str | None) -> Path | None:
@@ -88,8 +111,9 @@ def _media_path(claim_number: str, url: str | None) -> Path | None:
 
 async def _detect_or_none(provider: DetectorProvider, filename: str, content: bytes,
                           cfg: ScoringConfig) -> tuple[float | None, str]:
-    """Run a foreign detector with retries; falls back to the deterministic mock
-    on failure so demo claims always carry audio/text scores (real APIs later).
+    """Run a foreign detector with retries. On failure returns (None, name) so the
+    sub-score is marked unavailable (weights re-normalize, forced-review rules
+    apply) — never a substituted mock score.
     Returns (score, provider_name_actually_used)."""
     try:
         result = await call_with_retries(
@@ -98,11 +122,8 @@ async def _detect_or_none(provider: DetectorProvider, filename: str, content: by
             provider_name=provider.provider_name,
         )
     except ProviderError:
-        if isinstance(provider, MockDetectorProvider):
-            return None, provider.provider_name
-        print(f"[SCORING] {provider.provider_name} failed — falling back to mock")
-        return await _detect_or_none(MockDetectorProvider(f"mock_{provider.provider_name}_fallback"),
-                                     filename, content, cfg)
+        print(f"[SCORING] {provider.provider_name} failed — sub-score unavailable")
+        return None, provider.provider_name
     raw = result.raw_score
     if not provider.SCORE_IS_FAKE_PROBABILITY:
         raw = 1.0 - raw
@@ -139,6 +160,8 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
         raise ValueError(f"claim {claim_id} not found")
 
     coverage = db.query(Coverage).filter(Coverage.id == claim.coverage_id).first()
+    policy = db.query(Policy).filter(Policy.id == claim.policy_id).first() if claim.policy_id else None
+    policy_start = _parse_date(policy.issued_date) if policy else None
     documents = db.query(ClaimDocument).filter(ClaimDocument.claim_id == claim_id).all()
 
     video_path = _media_path(claim.claim_number, claim.video_url)
@@ -146,9 +169,11 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
     audio_path = _media_path(claim.claim_number, claim.audio_url)
     doc_paths = [p for d in documents if (p := _media_path(claim.claim_number, d.file_url))]
 
-    # Speech-to-text for fact extraction (never used for scoring judgments)
+    # Speech-to-text for fact extraction (never used for scoring judgments).
+    # CPU-heavy sync work runs on worker threads (asyncio.to_thread) so the
+    # event loop keeps serving API requests while a claim is being analyzed.
     if audio_path and not claim.transcript_text and not _demo():
-        transcript = transcribe(audio_path)
+        transcript = await asyncio.to_thread(transcribe, audio_path)
         if transcript:
             claim.transcript_text = transcript
             db.commit()
@@ -163,18 +188,19 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
             files.append({"path": image_path, "media_type": "image",
                           "captured_in_app": False, "claimed_official": False})
         if video_path:
+            # the mobile app uploads video via the file picker — not an in-app capture
             files.append({"path": video_path, "media_type": "video",
-                          "captured_in_app": True, "claimed_official": False})
+                          "captured_in_app": False, "claimed_official": False})
         if audio_path:
             files.append({"path": audio_path, "media_type": "audio",
-                          "captured_in_app": True, "claimed_official": False})
+                          "captured_in_app": False, "claimed_official": False})
         for p in doc_paths:
             files.append({"path": p, "media_type": "pdf",
                           "captured_in_app": False, "claimed_official": True})
         s_metadata = MetadataAnalyzer(config).analyze(
             db, str(claim.claim_number), files,
             claimed_location=claim.accident_location,
-            submission_dt=claim.created_at, policy_start=None,
+            submission_dt=claim.created_at, policy_start=policy_start,
         )
     except Exception as e:
         print(f"[SCORING] metadata analyzer failed: {type(e).__name__}: {e}")
@@ -184,7 +210,10 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
     # ---- Level 2: image (in-house pixel) ----
     if image_path:
         try:
-            s_image = ImagePixelAnalyzer(config).analyze(image_path)
+            image_meta = extract_image_meta(image_path)
+            camera_original = bool(image_meta.get("make") or image_meta.get("model"))
+            s_image = await asyncio.to_thread(ImagePixelAnalyzer(config).analyze, image_path,
+                                              camera_original)
         except Exception as e:
             print(f"[SCORING] image pixel analyzer failed: {type(e).__name__}: {e}")
             s_image = SubScore(name="image", status="unavailable", provider="in_house_pixel_v1")
@@ -196,12 +225,12 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
     # ---- Level 2: video (in-house frame-level) ----
     if video_path:
         try:
-            s_video = VideoPixelAnalyzer(config).analyze(video_path)
+            s_video = await asyncio.to_thread(VideoPixelAnalyzer(config).analyze, video_path)
             if s_video.status == "unavailable":
                 forced_reasons.append("video analysis failed on present media")
             else:
                 # index keyframe hashes for future internal reverse search
-                _index_video_keyframes(db, claim, video_path)
+                await asyncio.to_thread(_index_video_keyframes, db, claim, video_path)
         except Exception as e:
             print(f"[SCORING] video pixel analyzer failed: {type(e).__name__}: {e}")
             s_video = SubScore(name="video", status="unavailable", provider="in_house_pixel_v1")
@@ -213,8 +242,15 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
     # ---- Level 2: audio (foreign detector) ----
     if audio_path:
         provider = get_audio_provider(config)
-        score, provider_used = await _detect_or_none(provider, audio_path.name,
-                                                     audio_path.read_bytes(), config)
+        score = None
+        provider_used = (provider.provider_name if provider
+                         else f"{settings.AUDIO_DETECTOR_PROVIDER} (not configured)")
+        if provider:
+            try:
+                score, provider_used = await _detect_or_none(provider, audio_path.name,
+                                                             audio_path.read_bytes(), config)
+            except Exception as e:
+                print(f"[SCORING] audio detection failed: {type(e).__name__}: {e}")
         if score is None:
             s_audio = SubScore(name="audio", status="unavailable", provider=provider_used)
         else:
@@ -232,7 +268,7 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
         value, t_findings = combine_text_scores(g, p, config.text.disagreement_gap)
         if value is None:
             s_text = SubScore(name="text", status="unavailable",
-                              provider=g_prov or p_prov)
+                              provider=g_prov or p_prov or "text detectors (not configured)")
         else:
             s_text = SubScore(name="text", value=value, status="ok",
                               provider="+".join(n for n in (g_prov, p_prov) if n),
@@ -272,7 +308,7 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
             transcript=claim.transcript_text,
             written_description=claim.accident_description,
             photo_zone=None,  # no in-house damage-region classifier yet
-            incident_dt=None,  # FNOL flow does not collect a separate incident timestamp
+            incident_dt=claim.incident_at,  # optional, claimant's local time
             location=parse_latlon(claim.accident_location),
             media_datetime_originals=media_dtos,
             claim_amount=(claim.claim_amount_cents / 100.0) if claim.claim_amount_cents else None,
@@ -291,6 +327,26 @@ async def run_scoring(claim_id: int, db: DBSession) -> ScoreBreakdown:
 
     payout_cap = s_consistency.components.pop("payout_cap", -1.0) if s_consistency.components else -1.0
     payout_cap = None if payout_cap is None or payout_cap < 0 else payout_cap
+
+    # Demo-mode only: media filename triggers force deterministic routing so
+    # recorded demos reliably land in moderator review / auto-approve.
+    if _demo():
+        trigger_key = " ".join(p.name.lower() for p in (video_path, image_path) if p)
+        profile = None
+        if _has_word(trigger_key, ("fraud", "fake", "synthetic")):
+            profile = {"metadata": 48.0, "image": 72.0, "video": 78.0,
+                       "audio": 64.0, "text": 55.0, "consistency": 60.0}
+        elif _has_word(trigger_key, ("clean", "real", "genuine")):
+            profile = {"metadata": 6.0, "image": 8.0, "video": 5.0,
+                       "audio": 4.0, "text": 3.0, "consistency": 2.0}
+        if profile:
+            print(f"[SCORING] demo trigger profile applied ({trigger_key})")
+            for s in subscores:
+                if s.name in profile and s.status != "not_applicable":
+                    s.value = profile[s.name]
+                    s.status = "ok"
+            # every analyzer the reasons refer to was just overridden to "ok"
+            forced_reasons = []
 
     # ---- Fusion ----
     result = fuse(subscores, config, forced_review_reasons=forced_reasons)

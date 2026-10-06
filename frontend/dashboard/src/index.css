@@ -26,20 +26,20 @@
 }
 
 :root {
-  --background: #0B0F17;
-  --foreground: #E8EDF5;
+  --background: #0D0A0B;
+  --foreground: #EFEAEB;
   --card: rgba(255,255,255,0.04);
-  --card-foreground: #E8EDF5;
-  --primary: #0284C7;
+  --card-foreground: #EFEAEB;
+  --primary: #6E1423;
   --primary-foreground: #ffffff;
   --secondary: #1E2535;
-  --secondary-foreground: #94A3B8;
+  --secondary-foreground: #8A8A8A;
   --muted: #131926;
-  --muted-foreground: #64748B;
-  --accent: #2563EB;
+  --muted-foreground: #595959;
+  --accent: #800020;
   --accent-foreground: #ffffff;
   --border: rgba(255,255,255,0.08);
-  --ring: #0284C7;
+  --ring: #6E1423;
   --risk-high: #EF4444;
   --risk-medium: #F59E0B;
   --risk-low: #10B981;
@@ -92,7 +92,7 @@ body {
 
 /* Glowing border states */
 .glow-cyan {
-  box-shadow: 0 0 0 1px rgba(2,132,199,0.4), 0 0 20px rgba(2,132,199,0.12);
+  box-shadow: 0 0 0 1px rgba(110,20,35,0.4), 0 0 20px rgba(110,20,35,0.12);
 }
 .glow-red {
   box-shadow: 0 0 0 1px rgba(239,68,68,0.5), 0 0 24px rgba(239,68,68,0.18);
@@ -115,6 +115,17 @@ body {
 .dot-pulse {
   animation: pulse-dot 1.8s ease-in-out infinite;
 }
+
+/* "Formulating..." blinking dots (staggered) */
+@keyframes blink-dot {
+  0%, 20% { opacity: 0; }
+  40%, 100% { opacity: 1; }
+}
+.blink-dot {
+  animation: blink-dot 1.4s infinite both;
+}
+.blink-dot:nth-child(2) { animation-delay: 0.2s; }
+.blink-dot:nth-child(3) { animation-delay: 0.4s; }
 
 /* Scanner sweep animation */
 @keyframes scan-line {
@@ -162,8 +173,8 @@ body {
 /* Grid overlay pattern */
 .hud-grid {
   background-image:
-    linear-gradient(rgba(2,132,199,0.12) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(2,132,199,0.12) 1px, transparent 1px);
+    linear-gradient(rgba(110,20,35,0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110,20,35,0.12) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -184,9 +195,9 @@ body {
   color: #FCD34D;
 }
 .pill-blue {
-  background: rgba(2,132,199,0.15);
-  border: 1px solid rgba(2,132,199,0.35);
-  color: #7DD3FC;
+  background: rgba(110,20,35,0.15);
+  border: 1px solid rgba(110,20,35,0.35);
+  color: #E3ADBA;
 }
 
 /* Heatmap overlay */
@@ -203,27 +214,27 @@ body {
   transition: background 0.25s, border-color 0.25s;
 }
 .toggle-track.active {
-  background: rgba(2,132,199,0.35);
-  border-color: rgba(2,132,199,0.5);
+  background: rgba(110,20,35,0.35);
+  border-color: rgba(110,20,35,0.5);
 }
 .toggle-thumb {
   background: rgba(255,255,255,0.5);
   transition: transform 0.25s, background 0.25s;
 }
 .toggle-track.active .toggle-thumb {
-  background: #0284C7;
+  background: #6E1423;
   transform: translateX(20px);
 }
 
 /* Light mode override for mobile portal */
 .light-mode {
-  --background: #F8FAFC;
-  --foreground: #0F172A;
+  --background: #FFFFFF;
+  --foreground: #121212;
   --card: #ffffff;
-  --card-foreground: #0F172A;
-  --secondary: #F1F5F9;
-  --secondary-foreground: #475569;
-  --muted: #F8FAFC;
-  --muted-foreground: #64748B;
+  --card-foreground: #121212;
+  --secondary: #F3F0F1;
+  --secondary-foreground: #3A3A3A;
+  --muted: #FFFFFF;
+  --muted-foreground: #595959;
   --border: rgba(0,0,0,0.08);
 }

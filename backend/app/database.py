@@ -37,3 +37,6 @@ def run_migrations():
         if claim_cols and "valuation_report" not in claim_cols:
             conn.exec_driver_sql("ALTER TABLE claims ADD COLUMN valuation_report TEXT")
             conn.commit()
+        if claim_cols and "incident_at" not in claim_cols:
+            conn.exec_driver_sql("ALTER TABLE claims ADD COLUMN incident_at DATETIME")
+            conn.commit()

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import truststore
@@ -13,6 +14,7 @@ from app.database import engine, Base, run_migrations
 import app.models  # noqa: F401 — register core tables on Base
 import app.scoring.persistence  # noqa: F401 — register append-only scoring tables
 from app.scoring.config import get_config
+from app.agents.pipeline_runner import resume_interrupted_claims
 from app.routers import auth, policies, claims, moderator, siu, ws, efficiency, downloads, copilot, similarity
 
 # Validate scoring config at startup (raises on bad weights/thresholds)
@@ -25,7 +27,15 @@ run_migrations()
 # Ensure media directory exists
 Path("app/media_store").mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="SyntheticShield API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Claims left in "processing" by a restart/crash would otherwise never finish
+    if settings.RESUME_INTERRUPTED_CLAIMS:
+        resume_interrupted_claims()
+    yield
+
+
+app = FastAPI(title="SyntheticShield API", version="0.1.0", lifespan=lifespan)
 
 # CORS — allow configured local dev origins
 app.add_middleware(
